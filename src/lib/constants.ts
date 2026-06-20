@@ -3,31 +3,39 @@ export interface CryptoAsset {
   label: string;
   name: string;
   cmcId: number;
+  cgId: string; // CoinGecko coin ID for chart data
 }
 
 export const CRYPTO_SYMBOLS: CryptoAsset[] = [
-  { symbol: "BINANCE:BTCUSDT", label: "BTC", name: "Bitcoin", cmcId: 1 },
-  { symbol: "BINANCE:ETHUSDT", label: "ETH", name: "Ethereum", cmcId: 1027 },
-  { symbol: "BINANCE:SOLUSDT", label: "SOL", name: "Solana", cmcId: 5426 },
-  { symbol: "BINANCE:NEARUSDT", label: "NEAR", name: "NEAR Protocol", cmcId: 4256 },
-  { symbol: "BINANCE:BNBUSDT", label: "BNB", name: "BNB", cmcId: 1839 },
-  { symbol: "BINANCE:XRPUSDT", label: "XRP", name: "XRP", cmcId: 52 },
-  { symbol: "BINANCE:ADAUSDT", label: "ADA", name: "Cardano", cmcId: 2010 },
-  { symbol: "BINANCE:DOGEUSDT", label: "DOGE", name: "Dogecoin", cmcId: 74 },
-  { symbol: "BINANCE:AVAXUSDT", label: "AVAX", name: "Avalanche", cmcId: 5805 },
-  { symbol: "BINANCE:LINKUSDT", label: "LINK", name: "Chainlink", cmcId: 1975 },
-  { symbol: "BINANCE:DOTUSDT", label: "DOT", name: "Polkadot", cmcId: 6636 },
-  { symbol: "BINANCE:MATICUSDT", label: "MATIC", name: "Polygon", cmcId: 3890 },
-  { symbol: "BINANCE:LTCUSDT", label: "LTC", name: "Litecoin", cmcId: 2 },
-  { symbol: "BINANCE:UNIUSDT", label: "UNI", name: "Uniswap", cmcId: 7083 },
-  { symbol: "BINANCE:ATOMUSDT", label: "ATOM", name: "Cosmos", cmcId: 3794 },
-  { symbol: "BINANCE:APTUSDT", label: "APT", name: "Aptos", cmcId: 21714 },
-  { symbol: "BINANCE:ARBUSDT", label: "ARB", name: "Arbitrum", cmcId: 11841 },
-  { symbol: "BINANCE:OPUSDT", label: "OP", name: "Optimism", cmcId: 24178 },
-  { symbol: "BINANCE:INJUSDT", label: "INJ", name: "Injective", cmcId: 20887 },
-  { symbol: "BINANCE:SUIUSDT", label: "SUI", name: "Sui", cmcId: 20947 },
-  { symbol: "BINANCE:ZECUSDT", label: "ZEC", name: "Zcash", cmcId: 1437 },
+  { symbol: "BINANCE:BTCUSDT", label: "BTC", name: "Bitcoin", cmcId: 1, cgId: "bitcoin" },
+  { symbol: "BINANCE:ETHUSDT", label: "ETH", name: "Ethereum", cmcId: 1027, cgId: "ethereum" },
+  { symbol: "BINANCE:SOLUSDT", label: "SOL", name: "Solana", cmcId: 5426, cgId: "solana" },
+  { symbol: "BINANCE:NEARUSDT", label: "NEAR", name: "NEAR Protocol", cmcId: 4256, cgId: "near" },
+  { symbol: "BINANCE:BNBUSDT", label: "BNB", name: "BNB", cmcId: 1839, cgId: "binancecoin" },
+  { symbol: "BINANCE:XRPUSDT", label: "XRP", name: "XRP", cmcId: 52, cgId: "ripple" },
+  { symbol: "BINANCE:ADAUSDT", label: "ADA", name: "Cardano", cmcId: 2010, cgId: "cardano" },
+  { symbol: "BINANCE:DOGEUSDT", label: "DOGE", name: "Dogecoin", cmcId: 74, cgId: "dogecoin" },
+  { symbol: "BINANCE:AVAXUSDT", label: "AVAX", name: "Avalanche", cmcId: 5805, cgId: "avalanche-2" },
+  { symbol: "BINANCE:LINKUSDT", label: "LINK", name: "Chainlink", cmcId: 1975, cgId: "chainlink" },
+  { symbol: "BINANCE:DOTUSDT", label: "DOT", name: "Polkadot", cmcId: 6636, cgId: "polkadot" },
+  { symbol: "BINANCE:MATICUSDT", label: "MATIC", name: "Polygon", cmcId: 3890, cgId: "matic-network" },
+  { symbol: "BINANCE:LTCUSDT", label: "LTC", name: "Litecoin", cmcId: 2, cgId: "litecoin" },
+  { symbol: "BINANCE:UNIUSDT", label: "UNI", name: "Uniswap", cmcId: 7083, cgId: "uniswap" },
+  { symbol: "BINANCE:ATOMUSDT", label: "ATOM", name: "Cosmos", cmcId: 3794, cgId: "cosmos" },
+  { symbol: "BINANCE:APTUSDT", label: "APT", name: "Aptos", cmcId: 21714, cgId: "aptos" },
+  { symbol: "BINANCE:ARBUSDT", label: "ARB", name: "Arbitrum", cmcId: 11841, cgId: "arbitrum" },
+  { symbol: "BINANCE:OPUSDT", label: "OP", name: "Optimism", cmcId: 24178, cgId: "optimism" },
+  { symbol: "BINANCE:INJUSDT", label: "INJ", name: "Injective", cmcId: 20887, cgId: "injective-protocol" },
+  { symbol: "BINANCE:SUIUSDT", label: "SUI", name: "Sui", cmcId: 20947, cgId: "sui" },
+  { symbol: "BINANCE:ZECUSDT", label: "ZEC", name: "Zcash", cmcId: 1437, cgId: "zcash" },
 ];
+
+const _cgIdCache = new Map<string, string>();
+for (const c of CRYPTO_SYMBOLS) _cgIdCache.set(c.symbol, c.cgId);
+
+export function cgIdFromSymbol(symbol: string): string | null {
+  return _cgIdCache.get(symbol) ?? null;
+}
 
 const _labelCache = new Map<string, string>();
 for (const c of CRYPTO_SYMBOLS) _labelCache.set(c.symbol, c.label);

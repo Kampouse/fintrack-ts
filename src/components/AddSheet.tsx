@@ -6,6 +6,7 @@ import { getQuote, searchSymbols, type SearchResult } from "@/api/finnhub";
 import { TokenIcon } from "./TokenIcon";
 import { card, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
+import { CandleChart } from "./CandleChart";
 
 interface Props {
   onClose: () => void;
@@ -215,6 +216,8 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
             )}
           </>
         )}
+
+        <CandleChart symbol={symbol} />
 
         <div style={{ marginBottom: "12px" }}>
           <input type="number" inputMode="decimal" placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} style={input} />
