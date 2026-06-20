@@ -8,10 +8,8 @@ interface Props {
 }
 
 const TF = [
+  { days: 1, label: "24H" },
   { days: 7, label: "1W" },
-  { days: 30, label: "1M" },
-  { days: 90, label: "3M" },
-  { days: 365, label: "1Y" },
 ] as const;
 
 async function fetchOHLC(symbol: string, days: number) {

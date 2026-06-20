@@ -30,8 +30,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   // Pick timeframe based on days range
   let timeframe = DEFAULT_TIMEFRAME;
   let limit = days;
-  if (days <= 7) { timeframe = "1Hour"; limit = Math.min(days * 24, 1000); }
-  else if (days <= 30) { timeframe = "4Hour"; limit = Math.min(days * 6, 1000); }
+  if (days <= 1) { timeframe = "5Min"; limit = Math.min(24 * 12, 288); } // 5min bars, 24h = 288 max
+  else if (days <= 7) { timeframe = "1Hour"; limit = Math.min(days * 24, 1000); }
 
   const tf = TIMEFRAME_MAP[timeframe.toLowerCase()] || timeframe;
 
