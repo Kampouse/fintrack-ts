@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, type IChartApi, type CandlestickData, ColorType } from "lightweight-charts";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
 
 interface Props {
@@ -14,17 +13,161 @@ const TF = [
   { days: 7, label: "1W" },
 ] as const;
 
+interface Bar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 async function fetchOHLC(symbol: string, days: number) {
-  // Convert label (BTC) → Alpaca pair (BTC/USD)
   const alpacaSymbol = symbol.replace("BINANCE:", "").replace("USDT", "/USD");
   const res = await fetch(`/api/candles?symbol=${encodeURIComponent(alpacaSymbol)}&days=${days}`);
   if (!res.ok) throw new Error(`${res.status}`);
-  return res.json() as Promise<{ time: number; open: number; high: number; low: number; close: number }[]>;
+  return res.json() as Promise<Bar[]>;
+}
+
+function drawChart(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  bars: Bar[],
+  subDaily: boolean,
+) {
+  const dpr = window.devicePixelRatio || 1;
+
+  // Paddings
+  const padRight = 52;
+  const padBottom = 22;
+  const padTop = 6;
+  const padLeft = 4;
+  const chartW = w - padLeft - padRight;
+  const chartH = h - padTop - padBottom;
+
+  if (!bars.length || chartW < 20 || chartH < 20) return;
+
+  // Price range
+  let lo = Infinity, hi = -Infinity;
+  for (const b of bars) {
+    if (b.low < lo) lo = b.low;
+    if (b.high > hi) hi = b.high;
+  }
+  const priceRange = hi - lo || 1;
+  const pricePad = priceRange * 0.08;
+  lo -= pricePad;
+  hi += pricePad;
+  const totalRange = hi - lo;
+
+  // Map helpers
+  const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
+  const barWidth = chartW / bars.length;
+  const bodyWidth = Math.max(1, barWidth * 0.6);
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid lines (3 horizontal)
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 3; i++) {
+    const y = padTop + (chartH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(w - padRight, y);
+    ctx.stroke();
+  }
+
+  // Bars
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const x = padLeft + barWidth * i + barWidth / 2;
+    const isUp = b.close >= b.open;
+    const color = isUp ? "#53ff84" : "#f87171";
+    const bodyTop = priceToY(Math.max(b.open, b.close));
+    const bodyBot = priceToY(Math.min(b.open, b.close));
+    const bodyH = Math.max(1, bodyBot - bodyTop);
+
+    // Wick
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, priceToY(b.high));
+    ctx.lineTo(x, bodyTop);
+    ctx.moveTo(x, bodyBot);
+    ctx.lineTo(x, priceToY(b.low));
+    ctx.stroke();
+
+    // Body
+    ctx.fillStyle = color;
+    ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyH);
+  }
+
+  // Price labels (right axis, 4 labels)
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= 3; i++) {
+    const p = lo + (totalRange / 3) * i;
+    const y = priceToY(p);
+    const label = p >= 1000 ? p.toFixed(0) : p.toFixed(2);
+    ctx.fillText(label, w - padRight + 6, y);
+  }
+
+  // Time labels (x-axis)
+  if (bars.length > 1) {
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+
+    // Parse first and last bar times
+    const parseTime = (t: string) => {
+      // Accepts "YYYY-MM-DDTHH:mm:ss", "YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD"
+      const d = new Date(t);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+    };
+
+    const t0 = parseTime(bars[0].time);
+    const tN = parseTime(bars[bars.length - 1].time);
+    const span = tN - t0 || 1;
+
+    // Show 3-4 time labels evenly
+    const labelCount = bars.length <= 8 ? bars.length : Math.min(4, Math.floor(chartW / 80));
+    const step = Math.max(1, Math.floor(bars.length / labelCount));
+
+    for (let i = 0; i < bars.length; i += step) {
+      const t = parseTime(bars[i].time);
+      const x = padLeft + barWidth * i + barWidth / 2;
+      let label: string;
+      if (subDaily) {
+        label = new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+      } else {
+        label = new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+      }
+      ctx.fillText(label, x, h - padBottom + 4);
+    }
+    // Always show last label
+    const lastX = padLeft + barWidth * (bars.length - 1) + barWidth / 2;
+    const lastT = parseTime(bars[bars.length - 1].time);
+    const lastLabel = subDaily
+      ? new Date(lastT).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+      : new Date(lastT).toLocaleDateString([], { month: "short", day: "numeric" });
+    ctx.fillText(lastLabel, lastX, h - padBottom + 4);
+  }
+
+  // Right axis separator
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(w - padRight, padTop);
+  ctx.lineTo(w - padRight, h - padBottom);
+  ctx.stroke();
 }
 
 export function CandleChart({ symbol, height = 220 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -32,8 +175,22 @@ export function CandleChart({ symbol, height = 220 }: Props) {
   const cgId = cgIdFromSymbol(symbol);
   const canChart = !!cgId;
 
+  const barsRef = useRef<Bar[]>([]);
+  const render = useCallback((bars: Bar[], subDaily: boolean) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    drawChart(ctx, rect.width, rect.height, bars, subDaily);
+  }, []);
+
   useEffect(() => {
-    if (!containerRef.current || !canChart) return;
+    if (!canChart) return;
 
     let cancelled = false;
     setLoading(true);
@@ -42,80 +199,33 @@ export function CandleChart({ symbol, height = 220 }: Props) {
     fetchOHLC(symbol, days)
       .then((data) => {
         if (cancelled) return;
-
-        const candles: CandlestickData[] = data.map((c) => ({
-          time: c.time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }));
-
-        if (!containerRef.current) return;
-
-        if (chartRef.current) {
-          chartRef.current.remove();
-          chartRef.current = null;
-        }
-
-        const chart = createChart(containerRef.current, {
-          width: containerRef.current.clientWidth,
-          height,
-          layout: {
-            background: { type: ColorType.Solid, color: "transparent" },
-            textColor: "rgba(255,255,255,0.4)",
-            fontSize: 11,
-          },
-          grid: {
-            vertLines: { color: "rgba(255,255,255,0.04)" },
-            horzLines: { color: "rgba(255,255,255,0.04)" },
-          },
-          crosshair: { mode: 0 },
-          rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
-          timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: days <= 1 },
-          handleScroll: true,
-          handleScale: true,
-        });
-
-        const series = chart.addSeries(CandlestickSeries, {
-          upColor: "#53ff84",
-          downColor: "#f87171",
-          borderUpColor: "#53ff84",
-          borderDownColor: "#f87171",
-          wickUpColor: "#53ff84",
-          wickDownColor: "#f87171",
-        });
-        series.setData(candles);
-        console.log("[CandleChart] setData with", candles.length, "bars, first:", JSON.stringify(candles[0]), "last:", JSON.stringify(candles[candles.length-1]));
-        console.log("[CandleChart] series type:", series.seriesType());
-        chart.timeScale().fitContent();
-        chartRef.current = chart;
+        barsRef.current = data;
         setLoading(false);
+        render(data, days <= 1);
       })
-      .catch((e) => {
+      .catch(() => {
         if (!cancelled) {
-          console.error("[CandleChart] fetch failed", e);
           setError(true);
           setLoading(false);
         }
       });
 
-    const onResize = () => {
-      if (chartRef.current && containerRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener("resize", onResize);
+    return () => { cancelled = true; };
+  }, [cgId, symbol, days, canChart, render]);
 
-    return () => {
-      cancelled = true;
-      window.removeEventListener("resize", onResize);
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
-    };
-  }, [cgId, symbol, days, height, canChart]);
+  // ResizeObserver re-renders on container size change (bottom sheet, orientation)
+  useEffect(() => {
+    if (!canChart) return;
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (barsRef.current.length) render(barsRef.current, days <= 1);
+      });
+    });
+    if (canvasRef.current) observer.observe(canvasRef.current);
+    return () => { observer.disconnect(); cancelAnimationFrame(raf); };
+  }, [canChart, days, render]);
 
   if (!canChart) return null;
 
@@ -142,14 +252,22 @@ export function CandleChart({ symbol, height = 220 }: Props) {
         ))}
       </div>
       <div
-        ref={containerRef}
         style={{
           borderRadius: "12px",
           overflow: "hidden",
           background: "rgba(255,255,255,0.02)",
           position: "relative",
+          height,
         }}
       >
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "100%",
+          }}
+        />
         {loading && (
           <div
             style={{
@@ -169,12 +287,14 @@ export function CandleChart({ symbol, height = 220 }: Props) {
         {error && (
           <div
             style={{
-              height,
+              position: "absolute",
+              inset: 0,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               color: "var(--text-dim)",
               fontSize: "13px",
+              zIndex: 1,
             }}
           >
             Chart unavailable

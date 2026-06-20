@@ -10,7 +10,13 @@ export const theme = {
   textDim: "rgba(255,255,255,0.5)",
   red: "#f87171",
   green: "#4ade80",
+  mono: '"SF Mono", "JetBrains Mono", ui-monospace, monospace',
 } as const;
+
+export const row: CSSProperties = {
+  borderTop: `1px solid ${theme.cardBorder}`,
+  padding: '14px 0',
+};
 
 export const card: CSSProperties = {
   background: theme.card,

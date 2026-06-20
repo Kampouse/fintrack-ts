@@ -109,7 +109,7 @@ export default function App() {
 
       {enriched.length > 0 && <PortfolioSummary positions={enriched} />}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "16px" }}>
+      <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden", marginTop: "16px" }}>
         {enriched.map((pos) => (
           <PositionCard key={pos.symbol} pos={pos} onClick={() => setDetailSymbol(pos.symbol)} />
         ))}
