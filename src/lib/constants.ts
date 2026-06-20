@@ -10,7 +10,7 @@ export const CRYPTO_SYMBOLS: CryptoAsset[] = [
   { symbol: "BINANCE:BTCUSDT", label: "BTC", name: "Bitcoin", cmcId: 1, cgId: "bitcoin" },
   { symbol: "BINANCE:ETHUSDT", label: "ETH", name: "Ethereum", cmcId: 1027, cgId: "ethereum" },
   { symbol: "BINANCE:SOLUSDT", label: "SOL", name: "Solana", cmcId: 5426, cgId: "solana" },
-  { symbol: "BINANCE:NEARUSDT", label: "NEAR", name: "NEAR Protocol", cmcId: 4256, cgId: "near" },
+  { symbol: "BINANCE:NEARUSDT", label: "NEAR", name: "NEAR Protocol", cmcId: 6535, cgId: "near" },
   { symbol: "BINANCE:BNBUSDT", label: "BNB", name: "BNB", cmcId: 1839, cgId: "binancecoin" },
   { symbol: "BINANCE:XRPUSDT", label: "XRP", name: "XRP", cmcId: 52, cgId: "ripple" },
   { symbol: "BINANCE:ADAUSDT", label: "ADA", name: "Cardano", cmcId: 2010, cgId: "cardano" },

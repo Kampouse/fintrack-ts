@@ -4,6 +4,7 @@ import type { Transaction, Quote, Position } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
 import { CandleChart } from "./CandleChart";
+import type { PriceLevel } from "./CandleChart";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";
 import { fmtUsd, fmtPct, fmtNum, fmtDate } from "@/lib/format";
@@ -22,6 +23,8 @@ interface Props {
 export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot }: Props) {
   const [editLot, setEditLot] = useState<Transaction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [showLots, setShowLots] = useState(false);
+  const [showAvgs, setShowAvgs] = useState(false);
 
   const lots = txs.filter((t) => t.symbol === symbol).sort((a, b) => a.ts - b.ts);
   const label = labelFromSymbol(symbol);
@@ -47,6 +50,32 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
 
   const mono: React.CSSProperties = { fontFamily: theme.mono };
 
+  // Build price levels for chart overlay
+  const priceLevels: PriceLevel[] = [];
+  const lotColors = ["#38bdf8", "#fbbf24", "#a78bfa", "#f472b6", "#34d399", "#fb923c"];
+  if (showLots) {
+    lots.forEach((lot, i) => {
+      priceLevels.push({
+        price: lot.price,
+        label: `#${i + 1}`,
+        color: lotColors[i % lotColors.length],
+      });
+    });
+  }
+  if (showAvgs && lots.length > 1) {
+    let rc = 0, rq = 0;
+    lots.forEach((lot, i) => {
+      rc += lot.qty * lot.price;
+      rq += lot.qty;
+      const avg = rq > 0 ? rc / rq : 0;
+      priceLevels.push({
+        price: avg,
+        label: `Avg${i + 1}`,
+        color: "#c084fc",
+      });
+    });
+  }
+
   return (
     <div style={{ maxWidth: "min(720px, 100%)", margin: "0 auto", padding: "20px 16px 100px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
@@ -62,9 +91,51 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         </div>
       </div>
 
+      {/* Level toggles */}
+      {lots.length > 0 && (
+        <div style={{ display: "flex", gap: "6px", marginBottom: 12, flexWrap: "wrap" }}>
+          {lots.length > 0 && (
+            <button
+              onClick={() => setShowLots(!showLots)}
+              style={{
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "none",
+                background: showLots ? "rgba(56,189,248,0.15)" : "transparent",
+                color: showLots ? "#38bdf8" : "var(--text-dim)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: theme.mono,
+              }}
+            >
+              Lots
+            </button>
+          )}
+          {lots.length > 1 && (
+            <button
+              onClick={() => setShowAvgs(!showAvgs)}
+              style={{
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "none",
+                background: showAvgs ? "rgba(192,132,252,0.15)" : "transparent",
+                color: showAvgs ? "#c084fc" : "var(--text-dim)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: theme.mono,
+              }}
+            >
+              Avgs
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Desktop: chart left, info right. Mobile: stacked */}
       <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <CandleChart symbol={symbol} />
+        <CandleChart symbol={symbol} priceLevels={priceLevels} />
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <div style={{ ...card, padding: '12px 16px' }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
