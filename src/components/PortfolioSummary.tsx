@@ -11,8 +11,6 @@ export function PortfolioSummary({ positions }: Props) {
   const totalCost = positions.reduce((s, p) => s + p.totalCost, 0);
   const totalPnl = totalValue - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
-  const todayChange = positions.reduce((s, p) => s + (p.dayChange ?? 0), 0);
-
   const pnlColor = totalPnl >= 0 ? "var(--green)" : "var(--red)";
 
   return (
@@ -24,14 +22,6 @@ export function PortfolioSummary({ positions }: Props) {
             {fmtUsd(totalValue, 0)}
           </div>
         </div>
-        {todayChange !== 0 && (
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Today</div>
-            <div style={{ fontSize: "15px", fontWeight: 500, color: todayChange >= 0 ? "var(--green)" : "var(--red)" }}>
-              {fmtUsd(todayChange, 0)} {fmtPct(positions[0]?.changePct ?? null)}
-            </div>
-          </div>
-        )}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>Cost: {fmtUsd(totalCost, 0)}</span>

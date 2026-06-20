@@ -81,11 +81,6 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
             value={pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
             color={pnl != null ? (pnl >= 0 ? "var(--green)" : "var(--red)") : undefined}
           />
-          <Metric
-            label="Today"
-            value={dayChange != null ? `${fmtUsd(dayChange, 0)}` : "--"}
-            color={dayChange != null ? (dayChange >= 0 ? "var(--green)" : "var(--red)") : undefined}
-          />
         </div>
       </div>
 
