@@ -22,10 +22,36 @@ interface Bar {
 }
 
 async function fetchOHLC(symbol: string, days: number) {
-  const alpacaSymbol = symbol.replace("BINANCE:", "").replace("USDT", "/USD");
-  const res = await fetch(`/api/candles?symbol=${encodeURIComponent(alpacaSymbol)}&days=${days}`);
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json() as Promise<Bar[]>;
+  const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
+
+  let interval = "1d";
+  let limit = 90;
+  if (days < 0) { interval = "1m"; limit = 30; }
+  else if (days === 0) { interval = "5m"; limit = 30; }
+  else if (days <= 1) { interval = "5m"; limit = 48; }
+  else if (days <= 7) { interval = "1h"; limit = 48; }
+
+  // Fetch directly from Binance — CORS allowed, no keys needed
+  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=${interval}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data: unknown[][] = await res.json();
+  if (!data?.length) return [];
+
+  const isSubDaily = interval.includes("m") || interval.includes("h");
+  return data.map((k) => {
+    const d = new Date(k[0] as number);
+    const time = isSubDaily
+      ? d.toISOString().substring(0, 19)
+      : d.toISOString().split("T")[0];
+    return {
+      time,
+      open: parseFloat(k[1] as string),
+      high: parseFloat(k[2] as string),
+      low: parseFloat(k[3] as string),
+      close: parseFloat(k[4] as string),
+    };
+  });
 }
 
 function drawChart(
@@ -171,22 +197,36 @@ export function CandleChart({ symbol, height = 220 }: Props) {
   const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [empty, setEmpty] = useState(false);
 
   const cgId = cgIdFromSymbol(symbol);
   const canChart = !!cgId;
 
   const barsRef = useRef<Bar[]>([]);
   const render = useCallback((bars: Bar[], subDaily: boolean) => {
+    if (!bars.length) {
+      setEmpty(true);
+      setLoading(false);
+      return;
+    }
+    setEmpty(false);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    const w = rect.width;
+    const h = rect.height;
+    if (w < 10 || h < 10) {
+      // Canvas not laid out yet, retry after paint
+      requestAnimationFrame(() => render(bars, subDaily));
+      return;
+    }
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.scale(dpr, dpr);
-    drawChart(ctx, rect.width, rect.height, bars, subDaily);
+    drawChart(ctx, w, h, bars, subDaily);
   }, []);
 
   useEffect(() => {
@@ -201,7 +241,7 @@ export function CandleChart({ symbol, height = 220 }: Props) {
         if (cancelled) return;
         barsRef.current = data;
         setLoading(false);
-        render(data, days <= 1);
+        requestAnimationFrame(() => render(data, days <= 1));
       })
       .catch(() => {
         if (!cancelled) {
@@ -298,6 +338,22 @@ export function CandleChart({ symbol, height = 220 }: Props) {
             }}
           >
             Chart unavailable
+          </div>
+        )}
+        {empty && !loading && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--text-dim)",
+              fontSize: "13px",
+              zIndex: 1,
+            }}
+          >
+            No chart data
           </div>
         )}
       </div>

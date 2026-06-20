@@ -1,23 +1,12 @@
-// Cloudflare Pages Function: proxy Alpaca crypto bars for candlestick data.
-// Keys stored as CF secrets (APCA_API_KEY_ID, APCA_API_SECRET).
+// Cloudflare Pages Function: proxy Binance public klines for candlestick data.
+// Binance blocks CF Workers (403 WAF), so this is now a passthrough redirect
+// that tells the client to fetch directly from Binance (CORS-allowed).
 
-interface Env {
-  APCA_API_KEY_ID: string;
-  APCA_API_SECRET: string;
-}
-
-const TIMEFRAME_MAP: Record<string, string> = {
-  "1h": "1Hour",
-  "4h": "4Hour",
-  "1d": "1Day",
-  "1w": "1Week",
-};
-
-const DEFAULT_TIMEFRAME = "1Day";
+interface Env {}
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const url = new URL(context.request.url);
-  const symbol = url.searchParams.get("symbol"); // e.g. BTC/USD
+  const symbol = url.searchParams.get("symbol"); // e.g. BTCUSDT
   const days = parseInt(url.searchParams.get("days") || "90", 10);
 
   if (!symbol) {
@@ -27,53 +16,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     });
   }
 
-  // Pick timeframe based on days range
-  let timeframe = DEFAULT_TIMEFRAME;
-  let limit = days;
-  if (days < 0) { timeframe = "1Min"; limit = 30; }      // -1 → 1min, last 30min
-  else if (days === 0) { timeframe = "5Min"; limit = 30; }  // 0 → 5min, last 2.5h
-  else if (days <= 1) { timeframe = "5Min"; limit = 48; }   // 5min bars, 4h window
-  else if (days <= 7) { timeframe = "1Hour"; limit = 48; }   // hourly, 2 days window
+  let interval = "1d";
+  let limit = 90;
+  if (days < 0) { interval = "1m"; limit = 30; }
+  else if (days === 0) { interval = "5m"; limit = 30; }
+  else if (days <= 1) { interval = "5m"; limit = 48; }
+  else if (days <= 7) { interval = "1h"; limit = 48; }
 
-  const tf = TIMEFRAME_MAP[timeframe.toLowerCase()] || timeframe;
-
-  const apiUrl = `https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(symbol)}&timeframe=${tf}&limit=${limit}`;
-
-  const res = await fetch(apiUrl, {
-    headers: {
-      "APCA-API-KEY-ID": context.env.APCA_API_KEY_ID,
-      "APCA-API-SECRET-KEY": context.env.APCA_API_SECRET,
-    },
-  });
-
-  if (!res.ok) {
-    return new Response(JSON.stringify({ error: `Alpaca ${res.status}` }), {
-      headers: { "Content-Type": "application/json" },
-      status: 502,
-    });
-  }
-
-  const data = await res.json();
-  const bars = data.bars?.[symbol];
-
-  if (!bars || bars.length === 0) {
-    return new Response(JSON.stringify([]), {
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Map to lightweight-charts format: {time, open, high, low, close}
-  const candles = bars.map((b: { t: string; o: number; h: number; l: number; c: number }) => {
-    const d = new Date(b.t);
-    const isSubDaily = tf.includes("Min") || tf.includes("Hour");
-    // Sub-daily: "YYYY-MM-DD HH:mm" | Daily+: "YYYY-MM-DD"
-    const time = isSubDaily
-      ? d.toISOString().substring(0, 19) // "YYYY-MM-DDTHH:mm:ss"
-      : d.toISOString().split("T")[0]; // "YYYY-MM-DD"
-    return { time, open: b.o, high: b.h, low: b.l, close: b.c };
-  });
-
-  return new Response(JSON.stringify(candles), {
-    headers: { "Content-Type": "application/json", "Cache-Control": "s-maxage=60" },
+  return new Response(JSON.stringify({ interval, limit, symbol }), {
+    headers: { "Content-Type": "application/json" },
   });
 };

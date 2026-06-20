@@ -7,11 +7,16 @@ interface Props {
 }
 
 async function fetchMiniBars(symbol: string) {
-  const alpacaSymbol = symbol.replace("BINANCE:", "").replace("USDT", "/USD");
-  const res = await fetch(`/api/candles?symbol=${encodeURIComponent(alpacaSymbol)}&days=1`);
+  const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
+  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=5m&limit=48`;
+  const res = await fetch(url);
   if (!res.ok) return null;
-  const bars: { time: string; open: number; high: number; low: number; close: number }[] = await res.json();
-  return bars;
+  const data: unknown[][] = await res.json();
+  if (!data?.length) return null;
+  return data.map((k) => ({
+    time: new Date(k[0] as number).toISOString().substring(0, 19),
+    close: parseFloat(k[4] as string),
+  }));
 }
 
 export function Sparkline({ symbol, width = 64, height = 24 }: Props) {

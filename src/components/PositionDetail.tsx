@@ -48,7 +48,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const mono: React.CSSProperties = { fontFamily: theme.mono };
 
   return (
-    <div style={{ maxWidth: "480px", margin: "0 auto", padding: "20px 16px 100px" }}>
+    <div style={{ maxWidth: "min(720px, 100%)", margin: "0 auto", padding: "20px 16px 100px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
         <button onClick={onBack} style={btnIcon} aria-label="Back">
           <ChevronLeft size={20} color="var(--text)" />
@@ -62,34 +62,40 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         </div>
       </div>
 
-      <CandleChart symbol={symbol} />
-
-      <div style={{ ...card, padding: '12px 16px', marginBottom: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px" }}>
-          <div>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
-            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
-            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
-            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
-              {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
+      {/* Desktop: chart left, info right. Mobile: stacked */}
+      <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <CandleChart symbol={symbol} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          <div style={{ ...card, padding: '12px 16px' }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
+                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
+                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
+                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
+                  {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
+                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+              </div>
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
-            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+          <div style={{ ...card, flex: 1 }}>
+            <BasisChart lots={lots} currentPrice={price} />
           </div>
         </div>
       </div>
 
-      <div style={{ ...card, marginBottom: "16px" }}>
-        <BasisChart lots={lots} currentPrice={price} />
-      </div>
+      {/* Mobile: stack chart above metrics */}
+      <style>{`@media (max-width: 639px) { [data-detail-grid] { grid-template-columns: 1fr !important; } }`}</style>
 
       <div>
         <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>Lots</div>
