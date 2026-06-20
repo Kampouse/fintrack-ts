@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus } from "lucide-react";
+import { Plus, HelpCircle } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { labelFromSymbol } from "@/lib/constants";
@@ -8,11 +8,13 @@ import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
 import { PositionDetail } from "@/components/PositionDetail";
 import { AddSheet } from "@/components/AddSheet";
+import { HelpSheet } from "@/components/HelpSheet";
 import { btnIcon } from "@/lib/styles";
 
 export default function App() {
   const { txs, addLot, updateLot, removeLot } = useTransactions();
   const [showAdd, setShowAdd] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
 
@@ -91,13 +93,18 @@ export default function App() {
     <div style={{ maxWidth: "480px", margin: "0 auto", padding: "20px 16px 100px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h1 style={{ fontSize: "24px", fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-        <button
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setShowHelp(true)} style={btnIcon} aria-label="Help">
+            <HelpCircle size={18} color="var(--text-dim)" />
+          </button>
+          <button
           onClick={() => setShowAdd(true)}
           style={{ ...btnIcon, background: "var(--lime-dim)" }}
           aria-label="Add"
         >
           <Plus size={18} color="var(--lime)" />
         </button>
+        </div>
       </div>
 
       {enriched.length > 0 && <PortfolioSummary positions={enriched} />}
@@ -122,6 +129,7 @@ export default function App() {
           preselect={preselectSymbol}
         />
       )}
+      <HelpSheet open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 }
