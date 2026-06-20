@@ -14,21 +14,12 @@ const TF = [
   { days: 365, label: "1Y" },
 ] as const;
 
-async function fetchOHLC(cgId: string, days: number) {
-  // Fetch directly from CoinGecko in the browser — their CORS allows it.
-  // CF Workers get 403'd by Binance/CoinGecko WAF, but browsers are fine.
-  const res = await fetch(
-    `https://api.coingecko.com/api/v3/coins/${cgId}/ohlc?vs_currency=usd&days=${days}`,
-  );
+async function fetchOHLC(symbol: string, days: number) {
+  // Convert label (BTC) → Alpaca pair (BTC/USD)
+  const alpacaSymbol = symbol.replace("BINANCE:", "").replace("USDT", "/USD");
+  const res = await fetch(`/api/candles?symbol=${encodeURIComponent(alpacaSymbol)}&days=${days}`);
   if (!res.ok) throw new Error(`${res.status}`);
-  const raw: number[][] = await res.json();
-  return raw.map((k) => ({
-    time: Math.floor(k[0] / 1000),
-    open: k[1],
-    high: k[2],
-    low: k[3],
-    close: k[4],
-  }));
+  return res.json() as Promise<{ time: number; open: number; high: number; low: number; close: number }[]>;
 }
 
 export function CandleChart({ symbol, height = 220 }: Props) {
@@ -48,7 +39,7 @@ export function CandleChart({ symbol, height = 220 }: Props) {
     setLoading(true);
     setError(false);
 
-    fetchOHLC(cgId!, days)
+    fetchOHLC(symbol, days)
       .then((data) => {
         if (cancelled) return;
 
@@ -122,7 +113,7 @@ export function CandleChart({ symbol, height = 220 }: Props) {
         chartRef.current = null;
       }
     };
-  }, [cgId, days, height, canChart]);
+  }, [cgId, symbol, days, height, canChart]);
 
   if (!canChart) return null;
 
