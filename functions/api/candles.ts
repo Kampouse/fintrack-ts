@@ -30,7 +30,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   // Pick timeframe based on days range
   let timeframe = DEFAULT_TIMEFRAME;
   let limit = days;
-  if (days <= 1) { timeframe = "5Min"; limit = Math.min(24 * 12, 288); } // 5min bars, 24h = 288 max
+  if (days < 0) { timeframe = "1Min"; limit = 288; }   // -1 → 1min bars, 4.8h
+  else if (days === 0) { timeframe = "5Min"; limit = 288; } // 0 → 5min bars, 24h
+  else if (days <= 1) { timeframe = "5Min"; limit = Math.min(24 * 12, 288); } // 5min bars, 24h = 288 max
   else if (days <= 7) { timeframe = "1Hour"; limit = Math.min(days * 24, 1000); }
 
   const tf = TIMEFRAME_MAP[timeframe.toLowerCase()] || timeframe;
@@ -61,13 +63,15 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   // Map to lightweight-charts format: {time, open, high, low, close}
-  const candles = bars.map((b: { t: string; o: number; h: number; l: number; c: number }) => ({
-    time: Math.floor(new Date(b.t).getTime() / 1000),
-    open: b.o,
-    high: b.h,
-    low: b.l,
-    close: b.c,
-  }));
+  const candles = bars.map((b: { t: string; o: number; h: number; l: number; c: number }) => {
+    const d = new Date(b.t);
+    // For sub-daily bars, use YYYY-MM-DD HH:mm string; for daily+, use YYYY-MM-DD
+    const isSubDaily = tf.includes("Min") || tf.includes("Hour");
+    const timeStr = isSubDaily
+      ? d.toISOString().substring(0, 16) // "2026-06-20T08:00"
+      : d.toISOString().split("T")[0];   // "2026-06-20"
+    return { time: timeStr, open: b.o, high: b.h, low: b.l, close: b.c };
+  });
 
   return new Response(JSON.stringify(candles), {
     headers: { "Content-Type": "application/json", "Cache-Control": "s-maxage=60" },

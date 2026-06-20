@@ -8,6 +8,8 @@ interface Props {
 }
 
 const TF = [
+  { days: 0, label: "5m" },
+  { days: -1, label: "1m" },
   { days: 1, label: "24H" },
   { days: 7, label: "1W" },
 ] as const;
@@ -23,7 +25,7 @@ async function fetchOHLC(symbol: string, days: number) {
 export function CandleChart({ symbol, height = 220 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const [days, setDays] = useState(90);
+  const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -42,7 +44,7 @@ export function CandleChart({ symbol, height = 220 }: Props) {
         if (cancelled) return;
 
         const candles: CandlestickData[] = data.map((c) => ({
-          time: c.time as unknown as import("lightweight-charts").UTCTimestamp,
+          time: c.time,
           open: c.open,
           high: c.high,
           low: c.low,
@@ -70,7 +72,7 @@ export function CandleChart({ symbol, height = 220 }: Props) {
           },
           crosshair: { mode: 0 },
           rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
-          timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: false },
+          timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: days <= 1 },
           handleScroll: true,
           handleScale: true,
         });
@@ -84,6 +86,8 @@ export function CandleChart({ symbol, height = 220 }: Props) {
           wickDownColor: "#f87171",
         });
         series.setData(candles);
+        console.log("[CandleChart] setData with", candles.length, "bars, first:", JSON.stringify(candles[0]), "last:", JSON.stringify(candles[candles.length-1]));
+        console.log("[CandleChart] series type:", series.seriesType());
         chart.timeScale().fitContent();
         chartRef.current = chart;
         setLoading(false);
