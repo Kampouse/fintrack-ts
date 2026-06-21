@@ -33,6 +33,7 @@ export default function App() {
   const [showSync, setShowSync] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
+  const [terminalView, setTerminalView] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("portfolio");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
@@ -204,6 +205,8 @@ export default function App() {
             setDetailSymbol(null);
             setShowAdd(true);
           }}
+          terminal={terminalView}
+          onToggleTerminal={() => setTerminalView(!terminalView)}
         />
         {showAdd && (
           <AddSheet

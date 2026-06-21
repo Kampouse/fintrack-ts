@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronLeft, Trash2, Pencil, Plus } from "lucide-react";
+import { ChevronLeft, Trash2, Pencil, Plus, LayoutGrid, Monitor } from "lucide-react";
 import type { Transaction, Quote, Position } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
@@ -18,9 +18,11 @@ interface Props {
   onRemoveLot: (id: string) => void;
   onEditLot: (lot: Transaction) => void;
   onAddLot: () => void;
+  terminal: boolean;
+  onToggleTerminal: () => void;
 }
 
-export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot }: Props) {
+export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot, terminal, onToggleTerminal }: Props) {
   const [editLot, setEditLot] = useState<Transaction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
@@ -76,9 +78,99 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
     });
   }
 
+  const metricsRow = (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: 12 }}>
+      <div>
+        <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Price</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Qty</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>P&L</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
+          {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+      </div>
+    </div>
+  );
+
+  const lotsSection = (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+        <span style={{ fontSize: "14px", fontWeight: 600 }}>Lots</span>
+        <button onClick={onAddLot} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
+          <Plus size={18} color="var(--lime)" />
+        </button>
+      </div>
+      <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden" }}>
+        {lotRows.map(({ lot, runAvg }, i) => {
+          const lotValue = price != null ? price * lot.qty : null;
+          const lotPnl = lotValue != null ? lotValue - lot.qty * lot.price : null;
+          const lotColor = lotPnl != null ? (lotPnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
+
+          return (
+            <div key={lot.id} style={{ ...row, padding: "12px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>#{i + 1}</span>
+                  <span style={{ fontSize: "15px", fontWeight: 500, marginLeft: "8px", fontFamily: theme.mono }}>
+                    {fmtNum(lot.qty)} @ {fmtUsd(lot.price)}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "var(--text-dim)", marginLeft: "8px" }}>{fmtDate(lot.ts)}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: lotColor, fontFamily: theme.mono }}>
+                    {lotPnl != null ? `${fmtUsd(lotPnl, 0)}` : "--"}
+                  </span>
+                  <button
+                    onClick={() => setEditLot(lot)}
+                    style={{ ...btnIcon, width: "32px", height: "32px" }}
+                    aria-label="Edit lot"
+                  >
+                    <Pencil size={14} color="var(--text-dim)" />
+                  </button>
+                  {confirmDelete === lot.id ? (
+                    <button
+                      onClick={() => { onRemoveLot(lot.id); setConfirmDelete(null); }}
+                      style={{ ...btnIcon, width: "32px", height: "32px", background: "rgba(248,113,113,0.15)" }}
+                      aria-label="Confirm delete"
+                    >
+                      <Trash2 size={14} color="var(--red)" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(lot.id)}
+                      style={{ ...btnIcon, width: "32px", height: "32px" }}
+                      aria-label="Delete lot"
+                    >
+                      <Trash2 size={14} color="var(--text-dim)" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {i > 0 && (
+                <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "4px", marginLeft: "20px", fontFamily: theme.mono }}>
+                  Avg cost after this lot: {fmtUsd(runAvg)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
-    <div style={{ maxWidth: "min(720px, 100%)", margin: "0 auto", padding: "20px 16px 100px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
+    <div style={{ maxWidth: terminal ? "100%" : "min(720px, 100%)", margin: "0 auto", padding: "20px 16px 100px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
         <button onClick={onBack} style={btnIcon} aria-label="Back">
           <ChevronLeft size={20} color="var(--text)" />
         </button>
@@ -87,6 +179,16 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
           <button onClick={onAddLot} style={btnIcon} aria-label="Add to position">
             <Plus size={18} color="var(--lime)" />
+          </button>
+          <button
+            onClick={onToggleTerminal}
+            style={{
+              ...btnIcon,
+              background: terminal ? "var(--lime-dim)" : "transparent",
+            }}
+            aria-label="Toggle layout"
+          >
+            {terminal ? <Monitor size={16} color="var(--lime)" /> : <LayoutGrid size={16} color="var(--text-dim)" />}
           </button>
         </div>
       </div>
@@ -133,104 +235,52 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         </div>
       )}
 
-      {/* Desktop: chart left, info right. Mobile: stacked */}
-      <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <CandleChart symbol={symbol} priceLevels={priceLevels} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-          <div style={{ ...card, padding: '12px 16px' }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
-                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
-                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
-                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
-                  {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
+      {terminal ? (
+        /* Terminal view — full-width chart hero */
+        <>
+          {metricsRow}
+          <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
+            <CandleChart symbol={symbol} height={320} priceLevels={priceLevels} />
+          </div>
+          {lotsSection}
+        </>
+      ) : (
+        /* Normal view — chart left, info right */
+        <>
+          <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <CandleChart symbol={symbol} priceLevels={priceLevels} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+              <div style={{ ...card, padding: '12px 16px' }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
+                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
+                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
+                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
+                      {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
+                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
-                <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+              <div style={{ ...card, flex: 1 }}>
+                <BasisChart lots={lots} currentPrice={price} />
               </div>
             </div>
           </div>
-          <div style={{ ...card, flex: 1 }}>
-            <BasisChart lots={lots} currentPrice={price} />
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile: stack chart above metrics */}
-      <style>{`@media (max-width: 639px) { [data-detail-grid] { grid-template-columns: 1fr !important; } }`}</style>
-
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <span style={{ fontSize: "14px", fontWeight: 600 }}>Lots</span>
-          <button onClick={onAddLot} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
-            <Plus size={18} color="var(--lime)" />
-          </button>
-        </div>
-        <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden" }}>
-          {lotRows.map(({ lot, runAvg }, i) => {
-            const lotValue = price != null ? price * lot.qty : null;
-            const lotPnl = lotValue != null ? lotValue - lot.qty * lot.price : null;
-            const lotColor = lotPnl != null ? (lotPnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
-
-            return (
-              <div key={lot.id} style={{ ...row, padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>#{i + 1}</span>
-                    <span style={{ fontSize: "15px", fontWeight: 500, marginLeft: "8px", fontFamily: theme.mono }}>
-                      {fmtNum(lot.qty)} @ {fmtUsd(lot.price)}
-                    </span>
-                    <span style={{ fontSize: "12px", color: "var(--text-dim)", marginLeft: "8px" }}>{fmtDate(lot.ts)}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "14px", fontWeight: 500, color: lotColor, fontFamily: theme.mono }}>
-                      {lotPnl != null ? `${fmtUsd(lotPnl, 0)}` : "--"}
-                    </span>
-                    <button
-                      onClick={() => setEditLot(lot)}
-                      style={{ ...btnIcon, width: "32px", height: "32px" }}
-                      aria-label="Edit lot"
-                    >
-                      <Pencil size={14} color="var(--text-dim)" />
-                    </button>
-                    {confirmDelete === lot.id ? (
-                      <button
-                        onClick={() => { onRemoveLot(lot.id); setConfirmDelete(null); }}
-                        style={{ ...btnIcon, width: "32px", height: "32px", background: "rgba(248,113,113,0.15)" }}
-                        aria-label="Confirm delete"
-                      >
-                        <Trash2 size={14} color="var(--red)" />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmDelete(lot.id)}
-                        style={{ ...btnIcon, width: "32px", height: "32px" }}
-                        aria-label="Delete lot"
-                      >
-                        <Trash2 size={14} color="var(--text-dim)" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {i > 0 && (
-                  <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "4px", marginLeft: "20px", fontFamily: theme.mono }}>
-                    Avg cost after this lot: {fmtUsd(runAvg)}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+          <style>{`@media (max-width: 639px) { [data-detail-grid] { grid-template-columns: 1fr !important; } }`}</style>
+          {lotsSection}
+        </>
+      )}
 
       {editLot && (
         <EditLotSheet

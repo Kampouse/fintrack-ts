@@ -7,10 +7,23 @@ export interface PriceLevel {
   color: string;
 }
 
+export interface TrendLine {
+  id: number;
+  startTime: number;  // bar timestamp (ms)
+  startPrice: number;
+  endTime: number;    // bar timestamp (ms)
+  endPrice: number;
+  color: string;
+}
+
 interface Props {
   symbol: string;
   height?: number;
   priceLevels?: PriceLevel[];
+  trendlines?: TrendLine[];
+  onTrendlineAdd?: (tl: TrendLine) => void;
+  onTrendlineUpdate?: (tl: TrendLine) => void;
+  onTrendlineRemove?: (id: number) => void;
 }
 
 const TF = [
@@ -21,6 +34,8 @@ const TF = [
   { days: 30, label: "1M" },
   { days: 90, label: "3M" },
 ] as const;
+
+const TL_COLORS = ["#ff6b6b", "#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#fb923c", "#67e8f9"];
 
 interface Bar {
   time: string;
@@ -46,12 +61,15 @@ interface DrawState {
   totalRange: number;
   maxVol: number;
   priceToY: (p: number) => number;
+  yToPrice: (y: number) => number;
   barWidth: number;
   bodyWidth: number;
   viewStart: number;
   viewEnd: number;
   visibleBars: Bar[];
   volScale: number;
+  idxToX: (idx: number) => number;
+  xToIdx: (x: number) => number;
 }
 
 async function fetchOHLC(symbol: string, days: number) {
@@ -125,8 +143,9 @@ function buildDrawState(
     return {
       bars, subDaily, padLeft, padRight, padTop, padBottom,
       chartW, chartH, volH, lo: 0, hi: 1, totalRange: 1,
-      maxVol: 1, priceToY: () => 0, barWidth: 0, bodyWidth: 0,
+      maxVol: 1, priceToY: () => 0, yToPrice: () => 0, barWidth: 0, bodyWidth: 0,
       viewStart, viewEnd, visibleBars: [], volScale: 0,
+      idxToX: () => 0, xToIdx: () => 0,
     };
   }
 
@@ -147,15 +166,21 @@ function buildDrawState(
   const totalRange = hi - lo;
 
   const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
+  const yToPrice = (y: number) => lo + ((padTop + chartH - y) / chartH) * totalRange;
   const barWidth = chartW / visible.length;
   const bodyWidth = Math.max(1, barWidth * 0.6);
   const volScale = maxVol > 0 ? volH / maxVol : 0;
 
+  // Map absolute bar index to pixel X and back
+  const idxToX = (idx: number) => padLeft + (idx - vs + 0.5) * barWidth;
+  const xToIdx = (x: number) => vs + (x - padLeft) / barWidth - 0.5;
+
   return {
     bars, subDaily, padLeft, padRight, padTop, padBottom,
     chartW, chartH, volH, lo, hi, totalRange,
-    maxVol, priceToY, barWidth, bodyWidth,
+    maxVol, priceToY, yToPrice, barWidth, bodyWidth,
     viewStart: vs, viewEnd: ve, visibleBars: visible, volScale,
+    idxToX, xToIdx,
   };
 }
 
@@ -169,11 +194,27 @@ function drawChart(
   viewEnd: number,
   crossX: number | null,
   priceLevels: PriceLevel[],
+  trendlines: TrendLine[],
+  drawingLine: never | null,  // no longer used
+  selectedTlId: number | null,
 ) {
   const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
-    lo, hi, totalRange, priceToY, barWidth, bodyWidth,
-    visibleBars, volScale, viewStart: vs } = s;
+    lo, hi, totalRange, priceToY, yToPrice, barWidth, bodyWidth,
+    visibleBars, volScale, viewStart: vs, idxToX, xToIdx } = s;
+
+  // Helper: find bar index closest to a timestamp (ms)
+  const timeToIdx = (ts: number): number => {
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < bars.length; i++) {
+      const bt = parseTime(bars[i].time);
+      const d = Math.abs(bt - ts);
+      if (d < bestDist) { bestDist = d; best = i; }
+      if (bt > ts) break;
+    }
+    return best;
+  };
 
   if (!visibleBars.length) return;
 
@@ -185,6 +226,44 @@ function drawChart(
   for (let i = 1; i <= 3; i++) {
     const y = padTop + (chartH / 4) * i;
     ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
+  }
+
+  // Trendlines (drawn behind candles)
+  const allTrendlines = [...trendlines];
+  for (const tl of allTrendlines) {
+    const x1 = idxToX(timeToIdx(tl.startTime));
+    const y1 = priceToY(tl.startPrice);
+    const x2 = idxToX(timeToIdx(tl.endTime));
+    const y2 = priceToY(tl.endPrice);
+
+    if (x1 === x2 && y1 === y2) continue;
+
+    // Draw line segment between endpoints
+    ctx.strokeStyle = tl.color;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Small circles at endpoints — larger + filled for selected line
+    const isSelected = tl.id === selectedTlId;
+    const handleR = isSelected ? 5 : 3;
+    for (const [px, py] of [[x1, y1], [x2, y2]]) {
+      if (px >= padLeft && px <= w - padRight && py >= padTop && py <= padTop + chartH) {
+        ctx.fillStyle = isSelected ? "#fff" : tl.color;
+        ctx.beginPath();
+        ctx.arc(px, py, handleR, 0, Math.PI * 2);
+        ctx.fill();
+        if (isSelected) {
+          ctx.strokeStyle = tl.color;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
   }
 
   // Volume bars
@@ -202,7 +281,7 @@ function drawChart(
   ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.beginPath(); ctx.moveTo(padLeft, volBase); ctx.lineTo(w - padRight, volBase); ctx.stroke();
 
-  // SMAs — 200 only on daily timeframes with enough bars
+  // SMAs
   const sma20 = computeSMA(bars, Math.min(20, Math.floor(bars.length / 3)));
   const show200 = bars.length >= 200;
   const sma200 = show200 ? computeSMA(bars, 200) : new Map();
@@ -239,7 +318,6 @@ function drawChart(
     const bodyBot = priceToY(Math.min(b.open, b.close));
     const bodyH = Math.max(1, bodyBot - bodyTop);
 
-    // Wick
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -249,7 +327,6 @@ function drawChart(
     ctx.lineTo(x, priceToY(b.low));
     ctx.stroke();
 
-    // Body (hollow for down candles)
     if (isUp) {
       ctx.fillStyle = color;
       ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyH);
@@ -260,7 +337,7 @@ function drawChart(
     }
   }
 
-  // Current price line (last visible bar close)
+  // Current price line
   const lastBar = visibleBars[visibleBars.length - 1];
   const lastY = priceToY(lastBar.close);
   const isUp = lastBar.close >= lastBar.open;
@@ -289,7 +366,7 @@ function drawChart(
   ctx.textBaseline = "middle";
   ctx.fillText(tagLabel, tagX + tagW / 2, lastY);
 
-  // Custom price levels (entry prices, averages)
+  // Custom price levels
   for (const level of priceLevels) {
     if (level.price < lo || level.price > hi) continue;
     const ly = priceToY(level.price);
@@ -315,23 +392,19 @@ function drawChart(
 
   // Crosshair
   if (crossX != null && crossX >= padLeft && crossX <= w - padRight) {
-    // Find which bar
     const localIdx = Math.floor((crossX - padLeft) / barWidth);
     if (localIdx >= 0 && localIdx < visibleBars.length) {
       const b = visibleBars[localIdx];
       const snapX = padLeft + barWidth * localIdx + barWidth / 2;
 
-      // Vertical line
       ctx.strokeStyle = "rgba(255,255,255,0.2)";
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 2]);
       ctx.beginPath(); ctx.moveTo(snapX, padTop); ctx.lineTo(snapX, h - padBottom); ctx.stroke();
-      // Horizontal line at close
       const cY = priceToY(b.close);
       ctx.beginPath(); ctx.moveTo(padLeft, cY); ctx.lineTo(w - padRight, cY); ctx.stroke();
       ctx.setLineDash([]);
 
-      // Tooltip background
       const tooltipW = 130;
       const tooltipH = 52;
       let tx = snapX + 12;
@@ -365,7 +438,7 @@ function drawChart(
     }
   }
 
-  // MA legend (top-left)
+  // MA legend
   if (smas.length > 0) {
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "left";
@@ -400,9 +473,6 @@ function drawChart(
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
 
-    const t0 = parseTime(visibleBars[0].time);
-    const tN = parseTime(visibleBars[visibleBars.length - 1].time);
-
     const labelCount = visibleBars.length <= 8 ? visibleBars.length : Math.min(4, Math.floor(chartW / 80));
     const step = Math.max(1, Math.floor(visibleBars.length / labelCount));
 
@@ -414,7 +484,6 @@ function drawChart(
         : new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
       ctx.fillText(label, x, h - padBottom + 4);
     }
-    // Last label
     const lastX = padLeft + barWidth * (visibleBars.length - 1) + barWidth / 2;
     const lastT = parseTime(visibleBars[visibleBars.length - 1].time);
     const lastLabel = subDaily
@@ -429,13 +498,35 @@ function drawChart(
   ctx.beginPath(); ctx.moveTo(w - padRight, padTop); ctx.lineTo(w - padRight, h - padBottom); ctx.stroke();
 }
 
-export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
+export function CandleChart({
+  symbol,
+  height = 220,
+  priceLevels = [],
+  trendlines = [],
+  onTrendlineAdd,
+  onTrendlineUpdate,
+  onTrendlineRemove,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
   const hasLoaded = useRef(false);
   const [error, setError] = useState(false);
   const [empty, setEmpty] = useState(false);
+  const [internalTrendlines, setInternalTrendlines] = useState<TrendLine[]>([]);
+  const [selectedTlId, setSelectedTlId] = useState<number | null>(null);
+  const nextIdRef = useRef(1);
+
+  const activeTrendlines = onTrendlineAdd ? trendlines : internalTrendlines;
+  const updateTl = (tl: TrendLine) => {
+    if (onTrendlineUpdate) onTrendlineUpdate(tl);
+    else setInternalTrendlines(prev => prev.map(t => t.id === tl.id ? tl : t));
+  };
+  const removeTl = (id: number) => {
+    setSelectedTlId(null);
+    if (onTrendlineRemove) onTrendlineRemove(id);
+    else setInternalTrendlines(prev => prev.filter(t => t.id !== id));
+  };
 
   const cgId = cgIdFromSymbol(symbol);
   const canChart = !!cgId;
@@ -445,6 +536,118 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
   const crossXRef = useRef<number | null>(null);
   const pinchRef = useRef({ active: false, dist: 0, startView: [0, 0] as [number, number] });
   const panRef = useRef({ active: false, startX: 0, startView: [0, 0] as [number, number] });
+
+  // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
+  const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
+
+  // Helper: pixel coords to bar index + price
+  const pixelToData = useCallback((px: number, py: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !barsRef.current.length) return null;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    const s = buildDrawState(
+      { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
+      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length
+    );
+    const idx = Math.round(s.xToIdx(px));
+    const price = s.yToPrice(py);
+    const ts = parseTime(barsRef.current[Math.max(0, Math.min(idx, barsRef.current.length - 1))].time) || Date.now();
+    return { idx, price, ts };
+  }, [days]);
+
+  // Helper: find trendline + hit-test which part
+  const hitTestTrendline = useCallback((px: number, py: number): { tl: TrendLine; mode: "start" | "end" | "move" } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas || !barsRef.current.length) return null;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    const s = buildDrawState(
+      { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
+      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length
+    );
+
+    const timeToIdx = (ts: number): number => {
+      const bars = barsRef.current;
+      let best = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < bars.length; i++) {
+        const bt = parseTime(bars[i].time);
+        const d = Math.abs(bt - ts);
+        if (d < bestDist) { bestDist = d; best = i; }
+        if (bt > ts) break;
+      }
+      return best;
+    };
+
+    let best: { tl: TrendLine; mode: "start" | "end" | "move"; dist: number } | null = null;
+
+    for (const tl of activeTrendlines) {
+      const x1 = s.idxToX(timeToIdx(tl.startTime));
+      const y1 = s.priceToY(tl.startPrice);
+      const x2 = s.idxToX(timeToIdx(tl.endTime));
+      const y2 = s.priceToY(tl.endPrice);
+
+      // Endpoints: 12px radius
+      for (const [mode, ex, ey] of [["start", x1, y1], ["end", x2, y2]] as const) {
+        const d = Math.sqrt((px - ex) ** 2 + (py - ey) ** 2);
+        if (d < 12 && (!best || d < best.dist)) {
+          best = { tl, mode, dist: d };
+        }
+      }
+
+      // Line body: point-to-line distance, 8px threshold
+      const lenSq = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+      if (lenSq > 0) {
+        const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / lenSq));
+        const projX = x1 + t * (x2 - x1);
+        const projY = y1 + t * (y2 - y1);
+        const d = Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+        if (d < 8 && (!best || d < best.dist)) {
+          best = { tl, mode: "move", dist: d };
+        }
+      }
+    }
+
+    return best ? { tl: best.tl, mode: best.mode } : null;
+  }, [activeTrendlines, days]);
+
+  // Create a new trendline button handler
+  const handleCreateTrendline = useCallback(() => {
+    const bars = barsRef.current;
+    if (!bars.length) return;
+    const ve = viewRef.current.end || bars.length;
+    const vs = viewRef.current.start;
+    const mid = Math.floor((vs + ve) / 2);
+    const span = Math.max(3, Math.floor((ve - vs) / 6));
+    const midPrice = (s => { // use midpoint of visible price range
+      const canvas = canvasRef.current;
+      if (!canvas) return bars[Math.min(mid, bars.length - 1)].close;
+      const rect = canvas.getBoundingClientRect();
+      const st = buildDrawState(
+        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
+        bars, days <= 1, vs, ve
+      );
+      return (st.lo + st.hi) / 2;
+    })();
+
+    const newTl: TrendLine = {
+      id: nextIdRef.current++,
+      startTime: parseTime(bars[Math.max(0, mid - span)].time),
+      startPrice: midPrice,
+      endTime: parseTime(bars[Math.min(bars.length - 1, mid + span)].time),
+      endPrice: midPrice,
+      color: TL_COLORS[(onTrendlineAdd ? trendlines.length : internalTrendlines.length) % TL_COLORS.length],
+    };
+    if (onTrendlineAdd) {
+      onTrendlineAdd(newTl);
+    } else {
+      setInternalTrendlines(prev => [...prev, newTl]);
+    }
+    setSelectedTlId(newTl.id);
+  }, [days, onTrendlineAdd, trendlines, internalTrendlines]);
 
   const render = useCallback((bars: Bar[], subDaily: boolean, crossX?: number | null) => {
     if (!bars.length) {
@@ -473,8 +676,8 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
     const vs = v.end === 0 ? 0 : v.start;
     const ve = v.end === 0 ? bars.length : v.end;
 
-    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels);
-  }, [priceLevels]);
+    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, activeTrendlines, null, selectedTlId);
+  }, [priceLevels, activeTrendlines, selectedTlId]);
 
   useEffect(() => {
     if (!canChart) return;
@@ -499,6 +702,11 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
     return () => { cancelled = true; };
   }, [cgId, symbol, days, canChart, render]);
 
+  // Re-render when trendlines change
+  useEffect(() => {
+    if (barsRef.current.length) render(barsRef.current, days <= 1);
+  }, [activeTrendlines, render, days]);
+
   // ResizeObserver
   useEffect(() => {
     if (!canChart) return;
@@ -513,21 +721,85 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
     return () => { observer.disconnect(); cancelAnimationFrame(raf); };
   }, [canChart, days, render]);
 
-  // Touch + mouse handlers for crosshair, pinch-zoom, pan
+  // Pointer handlers: move/resize trendlines, crosshair, select
   const handlePointerMove = useCallback((e: React.PointerEvent | React.MouseEvent) => {
     if (!barsRef.current.length || pinchRef.current.active || panRef.current.active) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = (e as React.PointerEvent).clientX - rect.left;
+    const y = (e as React.PointerEvent).clientY - rect.top;
+
+    // Dragging a trendline
+    if (dragRef.current && (e as React.PointerEvent).buttons === 1) {
+      const data = pixelToData(x, y);
+      if (!data) return;
+      const drag = dragRef.current;
+      const orig = drag.origTl;
+      const dt = data.ts - drag.startTs;
+      const dy = data.price - drag.startPrice;
+
+      const updated: TrendLine = {
+        ...orig,
+        startPrice: orig.startPrice + dy,
+        endPrice: orig.endPrice + dy,
+      };
+      if (drag.mode === "start") {
+        updated.startTime = orig.startTime + dt;
+        updated.startPrice = orig.startPrice + dy;
+      } else if (drag.mode === "end") {
+        updated.endTime = orig.endTime + dt;
+        updated.endPrice = orig.endPrice + dy;
+      } else {
+        updated.startTime = orig.startTime + dt;
+        updated.endTime = orig.endTime + dt;
+        updated.startPrice = orig.startPrice + dy;
+        updated.endPrice = orig.endPrice + dy;
+      }
+      updateTl(updated);
+      return;
+    }
+
     crossXRef.current = x;
     render(barsRef.current, days <= 1, x);
-  }, [days, render]);
+  }, [days, render, pixelToData, updateTl]);
 
   const handlePointerLeave = useCallback(() => {
     crossXRef.current = null;
     if (barsRef.current.length) render(barsRef.current, days <= 1, null);
   }, [days, render]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const data = pixelToData(x, y);
+    if (!data) return;
+
+    // Hit-test trendlines
+    const hit = hitTestTrendline(x, y);
+    if (hit) {
+      setSelectedTlId(hit.tl.id);
+      dragRef.current = {
+        tlId: hit.tl.id,
+        mode: hit.mode,
+        startTs: data.ts,
+        startPrice: data.price,
+        origTl: { ...hit.tl },
+      };
+      return;
+    }
+
+    // Clicked empty space — deselect
+    setSelectedTlId(null);
+    dragRef.current = null;
+  }, [pixelToData, hitTestTrendline]);
+
+  const handlePointerUp = useCallback(() => {
+    dragRef.current = null;
+  }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -539,18 +811,67 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
     } else if (e.touches.length === 1 && !pinchRef.current.active) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.touches[0].clientX - rect.left;
+        const y = e.touches[0].clientY - rect.top;
+        const hit = hitTestTrendline(x, y);
+        if (hit) {
+          setSelectedTlId(hit.tl.id);
+          dragRef.current = {
+            tlId: hit.tl.id,
+            mode: hit.mode,
+            startTs: pixelToData(x, y)?.ts ?? Date.now(),
+            startPrice: pixelToData(x, y)?.price ?? 0,
+            origTl: { ...hit.tl },
+          };
+          return; // Don't start pan — this is a trendline drag
+        }
+      }
       panRef.current = {
         active: true,
         startX: e.touches[0].clientX,
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
     }
-  }, []);
+  }, [hitTestTrendline, pixelToData]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
     const bars = barsRef.current;
     if (!bars.length) return;
+
+    // Trendline drag (takes priority over pan)
+    if (dragRef.current && e.touches.length === 1) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.touches[0].clientX - rect.left;
+      const y = e.touches[0].clientY - rect.top;
+      const data = pixelToData(x, y);
+      if (!data) return;
+      const drag = dragRef.current;
+      const orig = drag.origTl;
+      const dt = data.ts - drag.startTs;
+      const dy = data.price - drag.startPrice;
+
+      const updated: TrendLine = { ...orig };
+      if (drag.mode === "start") {
+        updated.startTime = orig.startTime + dt;
+        updated.startPrice = orig.startPrice + dy;
+      } else if (drag.mode === "end") {
+        updated.endTime = orig.endTime + dt;
+        updated.endPrice = orig.endPrice + dy;
+      } else {
+        updated.startTime = orig.startTime + dt;
+        updated.endTime = orig.endTime + dt;
+        updated.startPrice = orig.startPrice + dy;
+        updated.endPrice = orig.endPrice + dy;
+      }
+      updateTl(updated);
+      return;
+    }
 
     if (pinchRef.current.active && e.touches.length === 2) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -577,11 +898,12 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
       viewRef.current = { start: newStart, end: newStart + range };
       render(bars, days <= 1, null);
     }
-  }, [days, render]);
+  }, [days, render, pixelToData, updateTl]);
 
   const handleTouchEnd = useCallback(() => {
     pinchRef.current = { active: false, dist: 0, startView: [0, 0] };
     panRef.current = { active: false, startX: 0, startView: [0, 0] };
+    dragRef.current = null;
   }, []);
 
   // Mouse wheel zoom
@@ -594,7 +916,6 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
     const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
     const newRange = Math.max(5, Math.min(bars.length, Math.round(range * zoomFactor)));
 
-    // Zoom toward mouse position
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -611,7 +932,9 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
 
   return (
     <div style={{ marginBottom: "16px" }}>
-      <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center", minHeight: 28 }}
+        onPointerDown={e => e.stopPropagation()}
+      >
         {TF.map((t) => (
           <button
             key={t.days}
@@ -630,6 +953,40 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
             {t.label}
           </button>
         ))}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center" }}>
+          <button
+            onClick={handleCreateTrendline}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: "rgba(255,107,107,0.1)",
+              color: "#ff6b6b",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            + Line
+          </button>
+          <button
+            onClick={() => removeTl(selectedTlId!)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: "transparent",
+              color: "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: selectedTlId != null ? "pointer" : "default",
+              visibility: selectedTlId != null ? "visible" : "hidden",
+            }}
+          >
+            Del
+          </button>
+        </div>
       </div>
       <div
         style={{
@@ -639,6 +996,8 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
           position: "relative",
           height,
           touchAction: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
         <canvas
@@ -646,6 +1005,8 @@ export function CandleChart({ symbol, height = 220, priceLevels = [] }: Props) {
           style={{ display: "block", width: "100%", height: "100%" }}
           onPointerMove={handlePointerMove}
           onPointerLeave={handlePointerLeave}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
