@@ -27,6 +27,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
   const [showAvgs, setShowAvgs] = useState(false);
+  const [chartH, setChartH] = useState(terminal ? 320 : 220);
 
   const lots = txs.filter((t) => t.symbol === symbol).sort((a, b) => a.ts - b.ts);
   const label = labelFromSymbol(symbol);
@@ -240,7 +241,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         <>
           {metricsRow}
           <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
-            <CandleChart symbol={symbol} height={320} priceLevels={priceLevels} />
+            <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
           </div>
           {lotsSection}
         </>
@@ -248,7 +249,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         /* Normal view — chart left, info right */
         <>
           <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-            <CandleChart symbol={symbol} priceLevels={priceLevels} />
+            <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
               <div style={{ ...card, padding: '12px 16px' }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>

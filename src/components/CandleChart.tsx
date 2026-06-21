@@ -19,6 +19,8 @@ export interface TrendLine {
 interface Props {
   symbol: string;
   height?: number;
+  resizable?: boolean;
+  onHeightChange?: (h: number) => void;
   priceLevels?: PriceLevel[];
   trendlines?: TrendLine[];
   onTrendlineAdd?: (tl: TrendLine) => void;
@@ -130,6 +132,7 @@ function buildDrawState(
   subDaily: boolean,
   viewStart: number,
   viewEnd: number,
+  priceOverride?: { lo: number; hi: number } | null,
 ): DrawState {
   const padRight = 56;
   const padBottom = 22;
@@ -161,8 +164,14 @@ function buildDrawState(
   }
   const priceRange = hi - lo || 1;
   const pricePad = priceRange * 0.08;
-  lo -= pricePad;
-  hi += pricePad;
+
+  if (priceOverride) {
+    lo = priceOverride.lo;
+    hi = priceOverride.hi;
+  } else {
+    lo -= pricePad;
+    hi += pricePad;
+  }
   const totalRange = hi - lo;
 
   const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
@@ -197,8 +206,9 @@ function drawChart(
   trendlines: TrendLine[],
   drawingLine: never | null,  // no longer used
   selectedTlId: number | null,
+  priceOverride?: { lo: number; hi: number } | null,
 ) {
-  const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd);
+  const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
     lo, hi, totalRange, priceToY, yToPrice, barWidth, bodyWidth,
     visibleBars, volScale, viewStart: vs, idxToX, xToIdx } = s;
@@ -501,6 +511,8 @@ function drawChart(
 export function CandleChart({
   symbol,
   height = 220,
+  resizable = false,
+  onHeightChange,
   priceLevels = [],
   trendlines = [],
   onTrendlineAdd,
@@ -516,6 +528,8 @@ export function CandleChart({
   const [internalTrendlines, setInternalTrendlines] = useState<TrendLine[]>([]);
   const [selectedTlId, setSelectedTlId] = useState<number | null>(null);
   const nextIdRef = useRef(1);
+  const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
+  const priceZoomAnchorRef = useRef<{ y: number; lo: number; hi: number } | null>(null);
 
   const activeTrendlines = onTrendlineAdd ? trendlines : internalTrendlines;
   const updateTl = (tl: TrendLine) => {
@@ -539,6 +553,8 @@ export function CandleChart({
 
   // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
   const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
+  // Overlay ref: when set, render uses this instead of activeTrendlines (avoids stale-canvas during drag)
+  const dragTrendlinesRef = useRef<TrendLine[] | null>(null);
 
   // Helper: pixel coords to bar index + price
   const pixelToData = useCallback((px: number, py: number) => {
@@ -549,7 +565,8 @@ export function CandleChart({
     const h = rect.height;
     const s = buildDrawState(
       { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
-      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length
+      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
+      priceZoomRef.current
     );
     const idx = Math.round(s.xToIdx(px));
     const price = s.yToPrice(py);
@@ -566,7 +583,8 @@ export function CandleChart({
     const h = rect.height;
     const s = buildDrawState(
       { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
-      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length
+      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
+      priceZoomRef.current
     );
 
     const timeToIdx = (ts: number): number => {
@@ -628,7 +646,7 @@ export function CandleChart({
       const rect = canvas.getBoundingClientRect();
       const st = buildDrawState(
         { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-        bars, days <= 1, vs, ve
+        bars, days <= 1, vs, ve, priceZoomRef.current
       );
       return (st.lo + st.hi) / 2;
     })();
@@ -676,8 +694,13 @@ export function CandleChart({
     const vs = v.end === 0 ? 0 : v.start;
     const ve = v.end === 0 ? bars.length : v.end;
 
-    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, activeTrendlines, null, selectedTlId);
+    const tls = dragTrendlinesRef.current ?? activeTrendlines;
+    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current);
   }, [priceLevels, activeTrendlines, selectedTlId]);
+
+  // Keep a ref to latest render so the fetch effect doesn't re-fire on trendline changes
+  const renderRef = useRef(render);
+  renderRef.current = render;
 
   useEffect(() => {
     if (!canChart) return;
@@ -686,21 +709,41 @@ export function CandleChart({
     if (!hasLoaded.current) setLoading(true);
     setError(false);
 
-    fetchOHLC(symbol, days)
-      .then((data) => {
-        if (cancelled) return;
-        barsRef.current = data;
-        hasLoaded.current = true;
-        viewRef.current = { start: 0, end: 0 };
-        setLoading(false);
-        requestAnimationFrame(() => render(data, days <= 1));
-      })
-      .catch(() => {
-        if (!cancelled) { setError(true); setLoading(false); }
-      });
+    const load = (initial: boolean) => {
+      fetchOHLC(symbol, days)
+        .then((data) => {
+          if (cancelled) return;
+          barsRef.current = data;
+          hasLoaded.current = true;
+          if (initial) {
+            const visibleCount = days <= 1 ? 80 : data.length;
+            const start = Math.max(0, data.length - visibleCount);
+            viewRef.current = { start, end: data.length };
+            priceZoomRef.current = null;
+          } else {
+            // If user was at the right edge, scroll to keep latest visible
+            const v = viewRef.current;
+            const prevLen = barsRef.current.length;
+            if (v.end === 0 || v.end >= prevLen) {
+              const range = v.end === 0 ? data.length : (v.end - v.start);
+              const newStart = Math.max(0, data.length - range);
+              viewRef.current = { start: newStart, end: data.length };
+            }
+          }
+          setLoading(false);
+          requestAnimationFrame(() => renderRef.current(data, days <= 1));
+        })
+        .catch(() => {
+          if (!cancelled) { setError(true); setLoading(false); }
+        });
+    };
 
-    return () => { cancelled = true; };
-  }, [cgId, symbol, days, canChart, render]);
+    const refreshMs = days <= 1 ? 5_000 : 15_000;
+    load(true);
+    const interval = setInterval(() => load(false), refreshMs);
+
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [cgId, symbol, days, canChart]);
 
   // Re-render when trendlines change
   useEffect(() => {
@@ -720,6 +763,24 @@ export function CandleChart({
     if (canvasRef.current) observer.observe(canvasRef.current);
     return () => { observer.disconnect(); cancelAnimationFrame(raf); };
   }, [canChart, days, render]);
+
+  // Chart resize via drag handle
+  const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
+  const handleResizeStart = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    resizeRef.current = { startY: e.clientY, startH: height };
+  }, [height]);
+  const handleResizeMove = useCallback((e: React.PointerEvent) => {
+    if (!resizeRef.current || !onHeightChange) return;
+    const dy = e.clientY - resizeRef.current.startY;
+    const newH = Math.max(120, Math.min(600, resizeRef.current.startH + dy));
+    onHeightChange(newH);
+  }, [onHeightChange]);
+  const handleResizeEnd = useCallback(() => {
+    resizeRef.current = null;
+  }, []);
 
   // Pointer handlers: move/resize trendlines, crosshair, select
   const handlePointerMove = useCallback((e: React.PointerEvent | React.MouseEvent) => {
@@ -757,12 +818,14 @@ export function CandleChart({
         updated.endPrice = orig.endPrice + dy;
       }
       updateTl(updated);
+      dragTrendlinesRef.current = activeTrendlines.map(t => t.id === updated.id ? updated : t);
+      render(barsRef.current, days <= 1);
       return;
     }
 
     crossXRef.current = x;
     render(barsRef.current, days <= 1, x);
-  }, [days, render, pixelToData, updateTl]);
+  }, [days, render, pixelToData, updateTl, activeTrendlines]);
 
   const handlePointerLeave = useCallback(() => {
     crossXRef.current = null;
@@ -781,6 +844,7 @@ export function CandleChart({
     // Hit-test trendlines
     const hit = hitTestTrendline(x, y);
     if (hit) {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
       setSelectedTlId(hit.tl.id);
       dragRef.current = {
         tlId: hit.tl.id,
@@ -799,6 +863,7 @@ export function CandleChart({
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null;
+    dragTrendlinesRef.current = null;
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -828,6 +893,21 @@ export function CandleChart({
           };
           return; // Don't start pan — this is a trendline drag
         }
+
+        // Price axis zone: start price zoom drag
+        if (x > rect.width - 56) {
+          const s = buildDrawState(
+            { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
+            barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
+            priceZoomRef.current
+          );
+          priceZoomAnchorRef.current = {
+            y: e.touches[0].clientY,
+            lo: s.lo,
+            hi: s.hi,
+          };
+          return; // Don't start pan
+        }
       }
       panRef.current = {
         active: true,
@@ -835,12 +915,29 @@ export function CandleChart({
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
     }
-  }, [hitTestTrendline, pixelToData]);
+  }, [hitTestTrendline, pixelToData, days]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
     const bars = barsRef.current;
     if (!bars.length) return;
+
+    // Price axis zoom drag
+    if (priceZoomAnchorRef.current && e.touches.length === 1) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const dy = e.touches[0].clientY - priceZoomAnchorRef.current.y;
+      const anchor = priceZoomAnchorRef.current;
+      const origRange = anchor.hi - anchor.lo;
+      const zoomFactor = Math.exp(-dy * 0.005); // drag up = zoom in
+      const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
+      // Anchor at center of original range
+      const mid = (anchor.lo + anchor.hi) / 2;
+      priceZoomRef.current = { lo: mid - newRange / 2, hi: mid + newRange / 2 };
+      render(bars, days <= 1, null);
+      return;
+    }
 
     // Trendline drag (takes priority over pan)
     if (dragRef.current && e.touches.length === 1) {
@@ -870,6 +967,8 @@ export function CandleChart({
         updated.endPrice = orig.endPrice + dy;
       }
       updateTl(updated);
+      dragTrendlinesRef.current = activeTrendlines.map(t => t.id === updated.id ? updated : t);
+      render(bars, days <= 1);
       return;
     }
 
@@ -904,6 +1003,7 @@ export function CandleChart({
     pinchRef.current = { active: false, dist: 0, startView: [0, 0] };
     panRef.current = { active: false, startX: 0, startView: [0, 0] };
     dragRef.current = null;
+    priceZoomAnchorRef.current = null;
   }, []);
 
   // Mouse wheel zoom
@@ -911,22 +1011,44 @@ export function CandleChart({
     const bars = barsRef.current;
     if (!bars.length) return;
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+
+    // Price axis zone: right padRight (56px)
+    if (mx > rect.width - 56) {
+      const s = buildDrawState(
+        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
+        bars, days <= 1, viewRef.current.start, viewRef.current.end || bars.length,
+        priceZoomRef.current
+      );
+      const priceAtY = s.yToPrice(e.clientY - rect.top);
+      const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+      const curRange = s.hi - s.lo;
+      const newRange = Math.max(curRange * 0.02, Math.min(curRange * 50, curRange * zoomFactor));
+      const ratio = (priceAtY - s.lo) / (s.hi - s.lo);
+      const newLo = priceAtY - newRange * ratio;
+      const newHi = priceAtY + newRange * (1 - ratio);
+      priceZoomRef.current = { lo: newLo, hi: newHi };
+      render(bars, days <= 1, null);
+      return;
+    }
+
+    // Time axis zoom
     const [curStart, curEnd] = [viewRef.current.start, viewRef.current.end || bars.length];
     const range = curEnd - curStart;
     const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
     const newRange = Math.max(5, Math.min(bars.length, Math.round(range * zoomFactor)));
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) / rect.width;
-    const center = curStart + range * mx;
-    let newStart = Math.round(center - newRange * mx);
+    const mxNorm = mx / rect.width;
+    const center = curStart + range * mxNorm;
+    let newStart = Math.round(center - newRange * mxNorm);
     newStart = Math.max(0, Math.min(bars.length - newRange, newStart));
 
     viewRef.current = { start: newStart, end: newStart + newRange };
     render(bars, days <= 1, null);
-  }, [render]);
+  }, [days, render]);
 
   if (!canChart) return null;
 
@@ -1034,6 +1156,25 @@ export function CandleChart({
           }}>No chart data</div>
         )}
       </div>
+      {resizable && (
+        <div
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          style={{
+            height: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "ns-resize",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            touchAction: "none",
+          }}
+        >
+          <div style={{ width: 32, height: 3, borderRadius: 2, background: "var(--text-dim)", opacity: 0.3 }} />
+        </div>
+      )}
     </div>
   );
 }
