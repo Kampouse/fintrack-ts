@@ -30,10 +30,11 @@ export function EditLotSheet({ lot, onClose, onSave }: Props) {
           borderTop: "1px solid var(--card-border)",
           borderRadius: "24px 24px 0 0",
           padding: "20px 16px 32px",
-          zIndex: 100,
+          zIndex: 260,
           maxWidth: "480px",
           margin: "0 auto",
         }}
+        className="sheet-enter"
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h2 style={{ fontSize: "18px", fontWeight: 600 }}>Edit Lot</h2>

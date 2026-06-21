@@ -169,7 +169,12 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
       <style>{`@media (max-width: 639px) { [data-detail-grid] { grid-template-columns: 1fr !important; } }`}</style>
 
       <div>
-        <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>Lots</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <span style={{ fontSize: "14px", fontWeight: 600 }}>Lots</span>
+          <button onClick={onAddLot} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
+            <Plus size={18} color="var(--lime)" />
+          </button>
+        </div>
         <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden" }}>
           {lotRows.map(({ lot, runAvg }, i) => {
             const lotValue = price != null ? price * lot.qty : null;

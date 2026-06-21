@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 
 export const theme = {
   bg: "#0a0a0a",
-  card: "rgba(255,255,255,0.04)",
+  card: "#141414",
   cardBorder: "rgba(255,255,255,0.08)",
   lime: "#bef264",
   limeDim: "rgba(190,242,100,0.12)",
@@ -18,11 +18,13 @@ export const row: CSSProperties = {
   padding: '14px 0',
 };
 
+// Glassmorphic card
 export const card: CSSProperties = {
-  background: theme.card,
-  border: `1px solid ${theme.cardBorder}`,
+  background: "#141414",
+  border: `1px solid rgba(255,255,255,0.08)`,
   borderRadius: "16px",
   padding: "16px",
+  boxShadow: "0 2px 16px rgba(0,0,0,0.4)",
 };
 
 export const btnIcon: CSSProperties = {

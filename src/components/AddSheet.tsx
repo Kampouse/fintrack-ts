@@ -91,7 +91,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 99 }} />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 250 }} />
       <div
         style={{
           position: "fixed",
@@ -102,12 +102,13 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
           borderTop: "1px solid var(--card-border)",
           borderRadius: "24px 24px 0 0",
           padding: "20px 16px 32px",
-          zIndex: 100,
+          zIndex: 260,
           maxWidth: "480px",
           margin: "0 auto",
           maxHeight: "85vh",
           overflow: "auto",
         }}
+        className="sheet-enter"
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <h2 style={{ fontSize: "18px", fontWeight: 600 }}>Add Buy</h2>
@@ -244,8 +245,8 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
             padding: "14px",
             borderRadius: "12px",
             border: "none",
-            background: valid ? "var(--lime)" : "var(--card-border)",
-            color: valid ? "#0a0a0a" : "var(--text-dim)",
+            background: valid ? "#22c55e" : "var(--card-border)",
+            color: valid ? "#fff" : "var(--text-dim)",
             fontSize: "15px",
             fontWeight: 600,
             cursor: valid ? "pointer" : "default",

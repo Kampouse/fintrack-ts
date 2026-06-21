@@ -34,5 +34,5 @@ export function useTransactions() {
     setTxs((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  return { txs, addLot, updateLot, removeLot };
+  return { txs, setTxs, addLot, updateLot, removeLot };
 }

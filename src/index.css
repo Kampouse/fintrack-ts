@@ -1,6 +1,6 @@
 :root {
   --bg: #0a0a0a;
-  --card: rgba(255, 255, 255, 0.04);
+  --card: #141414;
   --card-border: rgba(255, 255, 255, 0.08);
   --lime: #bef264;
   --lime-dim: rgba(190, 242, 100, 0.12);
@@ -24,10 +24,100 @@
 body {
   background: var(--bg);
   min-height: 100vh;
+  overscroll-behavior-y: contain;
 }
 
 #root {
   min-height: 100vh;
+}
+
+/* Page transitions — minimal opacity, respects prefers-reduced-motion */
+.page-enter {
+  animation: pageIn 0.12s ease-out forwards;
+}
+.page-exit {
+  animation: pageOut 0.08s ease-in forwards;
+}
+
+@keyframes pageIn {
+  from { opacity: 0.92; }
+  to { opacity: 1; }
+}
+
+@keyframes pageOut {
+  from { opacity: 1; }
+  to { opacity: 0.92; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .page-exit {
+    animation: none;
+  }
+}
+
+/* Tick flash on value change */
+@keyframes flashGreen {
+  0% { color: var(--green); }
+  100% { color: var(--text); }
+}
+@keyframes flashRed {
+  0% { color: var(--red); }
+  100% { color: var(--text); }
+}
+.flash-up { animation: flashGreen 0.4s ease-out; }
+.flash-down { animation: flashRed 0.4s ease-out; }
+
+/* Pull-to-refresh spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* Donut chart */
+.donut-chart {
+  transform: rotate(-90deg);
+}
+
+/* Bottom sheet slide-up */
+.sheet-enter {
+  animation: sheetUp 0.3s ease-out forwards;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Tab bar */
+.tab-bar {
+  background: #0a0a0a;
+  border-top: 1px solid var(--card-border);
+}
+
+/* Swipe action buttons */
+.swipe-actions {
+  display: flex;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+.swipe-actions.active {
+  transform: translateX(0);
 }
 
 input::placeholder {
@@ -52,3 +142,8 @@ input[type="number"] {
 input[type="datetime-local"] {
   color-scheme: dark;
 }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }

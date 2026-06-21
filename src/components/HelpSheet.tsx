@@ -19,7 +19,7 @@ export function HelpSheet({ open, onClose }: Props) {
     <>
       <div
         onClick={onClose}
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50 }}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 250 }}
       />
       <div
         style={{
@@ -32,7 +32,7 @@ export function HelpSheet({ open, onClose }: Props) {
           background: "var(--card-bg)",
           borderRadius: "20px 20px 0 0",
           padding: "20px 20px 32px",
-          zIndex: 51,
+          zIndex: 260,
           maxHeight: "70vh",
           overflowY: "auto",
         }}

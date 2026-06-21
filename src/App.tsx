@@ -1,28 +1,62 @@
-import { useState, useMemo } from "react";
-import { Plus, HelpCircle } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
+import { useNearAuth } from "@/contexts/NearAuth";
 import { labelFromSymbol } from "@/lib/constants";
-import type { EnrichedPosition, Position } from "@/types";
+import type { EnrichedPosition, Position, Transaction } from "@/types";
 import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
 import { PositionDetail } from "@/components/PositionDetail";
 import { AddSheet } from "@/components/AddSheet";
 import { HelpSheet } from "@/components/HelpSheet";
-import { btnIcon } from "@/lib/styles";
+import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet";
+import { TabBar } from "@/components/TabBar";
+import { SkeletonCard } from "@/components/SkeletonCard";
+import { btnIcon, theme } from "@/lib/styles";
+import { pullPositions, useSyncPush } from "@/lib/kv";
+
+type SortKey = "value" | "pnl" | "name" | "change";
+type Tab = "portfolio" | "search" | "settings";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  value: "Value",
+  pnl: "P&L",
+  name: "Name",
+  change: "24h",
+};
 
 export default function App() {
-  const { txs, addLot, updateLot, removeLot } = useTransactions();
+  const { txs, setTxs, addLot, updateLot, removeLot } = useTransactions();
   const [showAdd, setShowAdd] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSync, setShowSync] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
-
-  // Unique symbols from transactions
+  const [activeTab, setActiveTab] = useState<Tab>("portfolio");
+  const [sortKey, setSortKey] = useState<SortKey>("value");
+  const [sortAsc, setSortAsc] = useState(false);
+  const [pageTransition, setPageTransition] = useState<"enter" | "exit" | null>(null);
+  const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const symbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
 
   // Live quotes via server-side proxy (key never reaches client)
-  const { quotes } = useQuotes(symbols);
+  const { quotes, /* refreshQuotes */ } = useQuotes(symbols);
+
+  // Sync state
+  const [syncOn, setSyncOn] = useState(isSyncEnabled);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<number | null>(null);
+  const [remoteCount, setRemoteCount] = useState<number | null>(null);
+  const { push: pushToKv } = useSyncPush();
+
+  // Probe remote count when sync sheet opens and connected
+  useEffect(() => {
+    if (!showSync || !isConnected || !syncOn) return;
+    pullPositions(accountId!).then((data) => {
+      setRemoteCount(data?.length ?? null);
+    });
+  }, [showSync, isConnected, syncOn, accountId]);
 
   // Aggregate transactions into positions
   const positions: Position[] = useMemo(() => {
@@ -61,15 +95,108 @@ export default function App() {
     });
   }, [positions, quotes]);
 
+  // Sorted positions
+  const sorted = useMemo(() => {
+    return [...enriched].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "value": cmp = (b.value ?? 0) - (a.value ?? 0); break;
+        case "pnl": cmp = (b.pnl ?? 0) - (a.pnl ?? 0); break;
+        case "name": cmp = a.label.localeCompare(b.label); break;
+        case "change": cmp = ((b.changePct ?? 0) - (a.changePct ?? 0)); break;
+      }
+      return sortAsc ? -cmp : cmp;
+    });
+  }, [enriched, sortKey, sortAsc]);
+
+  // Navigate to detail with transition
+  const openDetail = useCallback((symbol: string) => {
+    setPageTransition("exit");
+    setTimeout(() => {
+      setDetailSymbol(symbol);
+      setPageTransition("enter");
+    }, 220);
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setPageTransition("exit");
+    setTimeout(() => {
+      setDetailSymbol(null);
+      setPageTransition(null);
+    }, 220);
+  }, []);
+
+  // Tab change: search tab opens add sheet, settings opens sync
+  const handleTabChange = useCallback((tab: Tab) => {
+    setActiveTab(tab);
+    if (tab === "search") {
+      setPreselectSymbol(null);
+      setShowAdd(true);
+    } else if (tab === "settings") {
+      setShowSync(true);
+    }
+  }, []);
+
+  // Sync: push
+  const handlePush = useCallback(async () => {
+    if (!isConnected || syncing) return;
+    setSyncing(true);
+    try {
+      await pushToKv(txs);
+      setLastSync(Date.now());
+      setRemoteCount(txs.length);
+    } catch (e) {
+      console.error("[fintrack] sync push failed:", e);
+    } finally {
+      setSyncing(false);
+    }
+  }, [isConnected, syncing, txs, pushToKv]);
+
+  // Sync: pull — fetch remote, merge with local (local wins on id conflict)
+  const handlePull = useCallback(async () => {
+    if (!isConnected || !accountId || syncing) return;
+    setSyncing(true);
+    try {
+      const remote = await pullPositions(accountId);
+      if (!remote || remote.length === 0) {
+        setSyncing(false);
+        return;
+      }
+      const remoteTxs = remote as Transaction[];
+      const localIds = new Set(txs.map(t => t.id));
+      // Add only remote positions not already present locally
+      const newRemote = remoteTxs.filter(t => !localIds.has(t.id));
+      const merged = [...txs, ...newRemote];
+      setTxs(merged);
+      setLastSync(Date.now());
+      setRemoteCount(remoteTxs.length);
+      setSyncing(false);
+      setShowSync(false);
+    } catch {
+      setSyncing(false);
+    }
+  }, [isConnected, accountId, syncing, txs, setTxs]);
+
+  // Toggle sync
+  const handleToggleSync = useCallback(() => {
+    const next = !syncOn;
+    setSyncOn(next);
+    setSyncEnabled(next);
+    if (!next) {
+      setRemoteCount(null);
+      setLastSync(null);
+    }
+  }, [syncOn]);
+
   // Detail view
   if (detailSymbol) {
     return (
-      <>
+      <div className={pageTransition === "enter" ? "page-enter" : pageTransition === "exit" ? "page-exit" : ""}>
         <PositionDetail
           symbol={detailSymbol}
           txs={txs}
           quote={quotes[detailSymbol]}
-          onBack={() => setDetailSymbol(null)}
+          onBack={closeDetail}
           onRemoveLot={removeLot}
           onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts })}
           onAddLot={() => {
@@ -85,37 +212,104 @@ export default function App() {
             preselect={preselectSymbol}
           />
         )}
-      </>
+      </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: "480px", margin: "0 auto", padding: "20px 16px 100px" }}>
+      <div style={{ maxWidth: "480px", margin: "0 auto", padding: "20px 16px 120px" }}>
+
+
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <h1 style={{ fontSize: "24px", fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setShowHelp(true)} style={btnIcon} aria-label="Help">
-            <HelpCircle size={18} color="var(--text-dim)" />
-          </button>
+        <div>
+          <h1 style={{ fontSize: "22px", fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+          <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "2px" }}>
+            {sorted.length} position{sorted.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {isConnected ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ fontSize: "12px", fontFamily: theme.mono, color: "var(--lime)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {accountId}
+              </span>
+              <button onClick={disconnect} style={btnIcon} aria-label="Disconnect">
+                <LogOut size={14} color="var(--text-dim)" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={connect} style={btnIcon} aria-label="Connect NEAR">
+              <Wallet size={18} color="#00d4ff" />
+            </button>
+          )}
+          {syncOn && isConnected && (
+            <button onClick={handlePush} style={btnIcon} aria-label="Sync" disabled={syncing}>
+              <Cloud size={16} color={syncing ? "var(--text-dim)" : "#00d4ff"} />
+            </button>
+          )}
           <button
-          onClick={() => setShowAdd(true)}
-          style={{ ...btnIcon, background: "var(--lime-dim)" }}
-          aria-label="Add"
-        >
-          <Plus size={18} color="var(--lime)" />
-        </button>
+            onClick={() => setShowAdd(true)}
+            style={{ ...btnIcon, background: "var(--lime-dim)" }}
+            aria-label="Add"
+          >
+            <Plus size={18} color="var(--lime)" />
+          </button>
         </div>
       </div>
 
       {enriched.length > 0 && <PortfolioSummary positions={enriched} />}
 
-      <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden", marginTop: "16px" }}>
-        {enriched.map((pos) => (
-          <PositionCard key={pos.symbol} pos={pos} onClick={() => setDetailSymbol(pos.symbol)} />
-        ))}
+      {/* Sort control */}
+      {sorted.length > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 16, marginBottom: 8 }}>
+          <span style={{ fontSize: "11px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Sort</span>
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+            <button
+              key={key}
+              onClick={() => {
+                if (sortKey === key) setSortAsc(!sortAsc);
+                else { setSortKey(key); setSortAsc(false); }
+              }}
+              style={{
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "none",
+                background: sortKey === key ? "var(--lime-dim)" : "transparent",
+                color: sortKey === key ? "var(--lime)" : "var(--text-dim)",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: theme.mono,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 2,
+              }}
+            >
+              {SORT_LABELS[key]}
+              {sortKey === key && (sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Position list */}
+      <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden", marginTop: "8px" }}>
+        {sorted.length > 0 ? (
+          sorted.map((pos) => (
+            <PositionCard
+              key={pos.symbol}
+              pos={pos}
+              onClick={() => openDetail(pos.symbol)}
+              onDelete={() => pos.lots.forEach((l) => removeLot(l.id))}
+            />
+          ))
+        ) : txs.length === 0 ? (
+          <SkeletonCard count={3} />
+        ) : null}
       </div>
 
-      {enriched.length === 0 && (
+      {enriched.length === 0 && txs.length === 0 && (
         <div style={{ textAlign: "center", paddingTop: "60px", color: "var(--text-dim)" }}>
           <div style={{ fontSize: "16px", marginBottom: "8px" }}>No positions yet</div>
           <div style={{ fontSize: "14px" }}>Tap + to add your first buy</div>
@@ -124,12 +318,24 @@ export default function App() {
 
       {showAdd && (
         <AddSheet
-          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-          onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); }}
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); setActiveTab("portfolio"); }}
+          onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); setActiveTab("portfolio"); }}
           preselect={preselectSymbol}
         />
       )}
-      <HelpSheet open={showHelp} onClose={() => setShowHelp(false)} />
+      <HelpSheet open={showHelp} onClose={() => { setShowHelp(false); setActiveTab("portfolio"); }} />
+      <SyncSheet
+        open={showSync}
+        enabled={syncOn}
+        syncing={syncing}
+        lastSync={lastSync}
+        remoteCount={remoteCount}
+        onToggle={handleToggleSync}
+        onPull={handlePull}
+        onPush={handlePush}
+        onClose={() => { setShowSync(false); setActiveTab("portfolio"); }}
+      />
+      <TabBar active={activeTab} onChange={handleTabChange} />
     </div>
   );
 }

@@ -1,9 +1,44 @@
+import { useState, useEffect, useRef } from "react";
 import type { EnrichedPosition } from "@/types";
-import { fmtUsd, fmtPct } from "@/lib/format";
+import { fmtPct, fmtUsd } from "@/lib/format";
 import { card, theme } from "@/lib/styles";
+import { Sparkline } from "./Sparkline";
+import { AllocationDonut } from "./AllocationDonut";
 
 interface Props {
   positions: EnrichedPosition[];
+}
+
+const ALLOC_COLORS = [
+  "#f59e0b", "#3b82f6", "#a78bfa", "#34d399",
+  "#f472b6", "#fb923c", "#38bdf8", "#e879f9",
+  "#4ade80", "#f87171",
+];
+
+function AnimatedNumber({ value, decimals = 0 }: { value: number; decimals?: number }) {
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    const start = performance.now();
+    const dur = 500;
+
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (value - from) * eased);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      else fromRef.current = value;
+    };
+
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [value]);
+
+  return fmtUsd(display, decimals);
 }
 
 export function PortfolioSummary({ positions }: Props) {
@@ -16,24 +51,62 @@ export function PortfolioSummary({ positions }: Props) {
   const pnlColor = totalPnl >= 0 ? "var(--green)" : "var(--red)";
   const dayColor = totalDayChange >= 0 ? "var(--green)" : "var(--red)";
 
+  // Tick flash
+  const [flash, setFlash] = useState<"up" | "down" | null>(null);
+  const prevRef = useRef(totalValue);
+  useEffect(() => {
+    if (totalValue > prevRef.current) setFlash("up");
+    else if (totalValue < prevRef.current) setFlash("down");
+    prevRef.current = totalValue;
+    const t = setTimeout(() => setFlash(null), 400);
+    return () => clearTimeout(t);
+  }, [totalValue]);
+
+  // Allocation donut slices
+  const allocSlices = positions
+    .filter((p) => p.value != null && p.value > 0)
+    .map((p, i) => ({
+      label: p.label,
+      value: p.value!,
+      color: ALLOC_COLORS[i % ALLOC_COLORS.length],
+    }));
+
+  // Portfolio sparkline — use first position as proxy (aggregated sparkline would need separate data)
+  const topSymbol = positions.length > 0 ? positions[0].symbol : null;
+
   return (
     <div style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "12px" }}>
-        <div style={{ fontSize: "13px", color: "var(--text-dim)" }}>Portfolio Value</div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", fontFamily: theme.mono }}>
-            {fmtUsd(totalValue, 0)}
+      <div style={{ display: "flex", gap: 16 }}>
+        {/* Main value section */}
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "8px" }}>
+            <div style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Portfolio
+            </div>
           </div>
-          <div style={{ fontSize: "13px", color: dayColor, fontFamily: theme.mono }}>
+          <div className={flash ? `flash-${flash}` : ""} style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", fontFamily: theme.mono }}>
+            <AnimatedNumber value={totalValue} />
+          </div>
+          <div style={{ fontSize: "13px", color: dayColor, fontFamily: theme.mono, marginTop: "2px" }}>
             {totalDayChange >= 0 ? "+" : ""}{fmtPct(dayChangePct)} today
           </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-dim)", fontFamily: theme.mono }}>{fmtUsd(totalCost, 0)} cost</span>
+            <span style={{ fontSize: "12px", fontWeight: 500, color: totalPnl !== 0 ? pnlColor : "var(--text-dim)", fontFamily: theme.mono }}>
+              {fmtUsd(totalPnl, 0)} {fmtPct(totalPnlPct)}
+            </span>
+          </div>
         </div>
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ fontSize: "13px", color: "var(--text-dim)", fontFamily: theme.mono }}>{fmtUsd(totalCost, 0)}</span>
-        <span style={{ fontSize: "13px", fontWeight: 500, color: totalPnl !== 0 ? pnlColor : "var(--text-dim)", fontFamily: theme.mono }}>
-          {fmtUsd(totalPnl, 0)} {fmtPct(totalPnlPct)}
-        </span>
+
+        {/* Allocation donut + sparkline */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+          <AllocationDonut slices={allocSlices} size={72} />
+          {topSymbol && (
+            <div style={{ opacity: 0.6 }}>
+              <Sparkline symbol={topSymbol} width={64} height={20} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

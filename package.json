@@ -10,8 +10,11 @@
     "deploy": "npx wrangler pages deploy dist --project-name fintrack"
   },
   "dependencies": {
+    "@hot-labs/near-connect": "^0.11.4",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.400.0",
+    "near-api-js": "^7.2.0",
+    "near-kit": "^0.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
