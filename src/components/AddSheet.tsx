@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Search } from "lucide-react";
 import type { Quote } from "@/types";
-import { CRYPTO_SYMBOLS, tokenIcon, labelFromSymbol } from "@/lib/constants";
+import { ALL_SYMBOLS, tokenIcon, labelFromSymbol } from "@/lib/constants";
 import { getQuote, searchSymbols, type SearchResult } from "@/api/finnhub";
 import { TokenIcon } from "./TokenIcon";
 import { card, input } from "@/lib/styles";
@@ -192,7 +192,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
             ) : (
               /* Crypto quick-grid (original) */
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
-                {CRYPTO_SYMBOLS.map((c) => (
+                {ALL_SYMBOLS.map((c) => (
                   <button
                     key={c.symbol}
                     onClick={() => setSymbol(c.symbol)}

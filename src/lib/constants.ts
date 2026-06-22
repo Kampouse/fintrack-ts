@@ -4,6 +4,7 @@ export interface CryptoAsset {
   name: string;
   cmcId: number;
   cgId: string; // CoinGecko coin ID for chart data
+  type?: "crypto" | "stock";
 }
 
 export const CRYPTO_SYMBOLS: CryptoAsset[] = [
@@ -30,22 +31,50 @@ export const CRYPTO_SYMBOLS: CryptoAsset[] = [
   { symbol: "BINANCE:ZECUSDT", label: "ZEC", name: "Zcash", cmcId: 1437, cgId: "zcash" },
 ];
 
+export const STOCK_SYMBOLS: CryptoAsset[] = [
+  { symbol: "AAPL", label: "AAPL", name: "Apple", cmcId: 0, cgId: "apple", type: "stock" },
+  { symbol: "MSFT", label: "MSFT", name: "Microsoft", cmcId: 0, cgId: "microsoft", type: "stock" },
+  { symbol: "GOOGL", label: "GOOGL", name: "Alphabet", cmcId: 0, cgId: "google", type: "stock" },
+  { symbol: "AMZN", label: "AMZN", name: "Amazon", cmcId: 0, cgId: "amazon", type: "stock" },
+  { symbol: "NVDA", label: "NVDA", name: "NVIDIA", cmcId: 0, cgId: "nvidia", type: "stock" },
+  { symbol: "META", label: "META", name: "Meta", cmcId: 0, cgId: "meta", type: "stock" },
+  { symbol: "TSLA", label: "TSLA", name: "Tesla", cmcId: 0, cgId: "tesla", type: "stock" },
+  { symbol: "NFLX", label: "NFLX", name: "Netflix", cmcId: 0, cgId: "netflix", type: "stock" },
+];
+
+export const ALL_SYMBOLS = [...CRYPTO_SYMBOLS, ...STOCK_SYMBOLS];
+
 const _cgIdCache = new Map<string, string>();
-for (const c of CRYPTO_SYMBOLS) _cgIdCache.set(c.symbol, c.cgId);
+for (const c of ALL_SYMBOLS) _cgIdCache.set(c.symbol, c.cgId);
 
 export function cgIdFromSymbol(symbol: string): string | null {
   return _cgIdCache.get(symbol) ?? null;
 }
 
 const _labelCache = new Map<string, string>();
-for (const c of CRYPTO_SYMBOLS) _labelCache.set(c.symbol, c.label);
+for (const c of ALL_SYMBOLS) _labelCache.set(c.symbol, c.label);
 
 export function labelFromSymbol(symbol: string): string {
   return _labelCache.get(symbol) ?? symbol.split(":").pop()?.replace("USDT", "") ?? symbol;
 }
 
 export function tokenIcon(symbol: string, size = 64): string | null {
-  const id = CRYPTO_SYMBOLS.find((c) => c.symbol === symbol)?.cmcId;
-  if (!id) return null;
-  return `https://s2.coinmarketcap.com/static/img/coins/${size}x${size}/${id}.png`;
+  // Try TradingView CDN first
+  const asset = ALL_SYMBOLS.find((c) => c.symbol === symbol);
+  if (asset?.type === "stock" && asset.cgId) {
+    return `https://s3-symbol-logo.tradingview.com/${asset.cgId}.svg`;
+  }
+  // Crypto: try TradingView crypto CDN
+  const baseSymbol = symbol.replace("BINANCE:", "").replace("USDT", "");
+  if (baseSymbol) {
+    return `https://s3-symbol-logo.tradingview.com/crypto/XTVC${baseSymbol}.svg`;
+  }
+  // Fallback to CMC
+  const id = asset?.cmcId;
+  if (id) return `https://s2.coinmarketcap.com/static/img/coins/${size}x${size}/${id}.png`;
+  return null;
+}
+
+export function isStock(symbol: string): boolean {
+  return !symbol.startsWith("BINANCE:");
 }

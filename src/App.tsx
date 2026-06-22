@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useNearAuth } from "@/contexts/NearAuth";
@@ -10,6 +10,9 @@ import { PositionCard } from "@/components/PositionCard";
 import { PositionDetail } from "@/components/PositionDetail";
 import { AddSheet } from "@/components/AddSheet";
 import { HelpSheet } from "@/components/HelpSheet";
+import { WatchList } from "@/components/WatchList";
+import { WatchListSheet } from "@/components/WatchListSheet";
+import { ChartPreviewSheet } from "@/components/ChartPreviewSheet";
 import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet";
 import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
@@ -17,7 +20,7 @@ import { btnIcon, theme } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
-type Tab = "portfolio" | "search" | "settings";
+type Tab = "portfolio";
 
 const SORT_LABELS: Record<SortKey, string> = {
   value: "Value",
@@ -33,11 +36,27 @@ export default function App() {
   const [showSync, setShowSync] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
+  const [chartPreview, setChartPreview] = useState<string | null>(null);
   const [terminalView, setTerminalView] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("portfolio");
+  const [showWatch, setShowWatch] = useState(false);
+  const [showSortDD, setShowSortDD] = useState(false);
+  const sortDDRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
   const [pageTransition, setPageTransition] = useState<"enter" | "exit" | null>(null);
+
+  // Close sort dropdown on outside click
+  useEffect(() => {
+    if (!showSortDD) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (sortDDRef.current && !sortDDRef.current.contains(e.target as Node)) setShowSortDD(false);
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("touchstart", handler); };
+  }, [showSortDD]);
+
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const symbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
 
@@ -130,12 +149,6 @@ export default function App() {
   // Tab change: search tab opens add sheet, settings opens sync
   const handleTabChange = useCallback((tab: Tab) => {
     setActiveTab(tab);
-    if (tab === "search") {
-      setPreselectSymbol(null);
-      setShowAdd(true);
-    } else if (tab === "settings") {
-      setShowSync(true);
-    }
   }, []);
 
   // Sync: push
@@ -192,7 +205,8 @@ export default function App() {
   // Detail view
   if (detailSymbol) {
     return (
-      <div className={pageTransition === "enter" ? "page-enter" : pageTransition === "exit" ? "page-exit" : ""}>
+      <div className={pageTransition === "enter" ? "page-enter" : pageTransition === "exit" ? "page-exit" : ""} style={{ maxWidth: 768, margin: "0 auto", padding: "20px var(--app-hpad, 16px) 40px" }}>
+      <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
         <PositionDetail
           symbol={detailSymbol}
           txs={txs}
@@ -220,7 +234,7 @@ export default function App() {
   }
 
   return (
-      <div style={{ maxWidth: "480px", margin: "0 auto", padding: "20px 16px 120px" }}>
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px var(--app-hpad, 16px) 40px" }} className="app-content">
 
 
       {/* Header */}
@@ -247,54 +261,72 @@ export default function App() {
             </button>
           )}
           {syncOn && isConnected && (
-            <button onClick={handlePush} style={btnIcon} aria-label="Sync" disabled={syncing}>
-              <Cloud size={16} color={syncing ? "var(--text-dim)" : "#00d4ff"} />
+            <button onClick={handlePull} disabled={syncing} style={{ ...btnIcon, opacity: syncing ? 0.5 : 1 }} aria-label="Pull">
+              <RefreshCw size={14} color={syncing ? "var(--lime)" : "var(--text-dim)"} style={{ animation: syncing ? "spin 1s linear infinite" : "none" }} />
             </button>
           )}
-          <button
-            onClick={() => setShowAdd(true)}
-            style={{ ...btnIcon, background: "var(--lime-dim)" }}
-            aria-label="Add"
-          >
-            <Plus size={18} color="var(--lime)" />
+          <button onClick={() => setShowSync(true)} style={btnIcon} aria-label="Cloud settings">
+            {syncOn && isConnected ? <Cloud size={14} color="#00d4ff" /> : <CloudOff size={14} color="var(--text-dim)" />}
           </button>
         </div>
       </div>
 
       {enriched.length > 0 && <PortfolioSummary positions={enriched} />}
 
-      {/* Sort control */}
-      {sorted.length > 1 && (
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 16, marginBottom: 8 }}>
-          <span style={{ fontSize: "11px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Sort</span>
-          {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+      {/* Sort dropdown + actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 12, marginBottom: 8 }}>
+        {sorted.length > 1 && (
+          <div style={{ position: "relative" }}>
             <button
-              key={key}
-              onClick={() => {
-                if (sortKey === key) setSortAsc(!sortAsc);
-                else { setSortKey(key); setSortAsc(false); }
-              }}
+              onClick={() => setShowSortDD(!showSortDD)}
               style={{
-                padding: "3px 8px",
-                borderRadius: "6px",
-                border: "none",
-                background: sortKey === key ? "var(--lime-dim)" : "transparent",
-                color: sortKey === key ? "var(--lime)" : "var(--text-dim)",
-                fontSize: "11px",
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: theme.mono,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 2,
+                padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--card-border)",
+                background: "transparent", color: "var(--lime)", fontSize: "11px", fontWeight: 500,
+                cursor: "pointer", fontFamily: theme.mono, display: "inline-flex", alignItems: "center", gap: 4,
               }}
             >
-              {SORT_LABELS[key]}
-              {sortKey === key && (sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
+              {SORT_LABELS[sortKey]} {sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
-          ))}
+            {showSortDD && (
+              <div ref={sortDDRef} style={{
+                position: "absolute", top: "100%", left: 0, marginTop: 4,
+                background: "var(--card)", border: "1px solid var(--card-border)", borderRadius: 8,
+                overflow: "hidden", minWidth: 100, zIndex: 50,
+              }}>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (sortKey === key) setSortAsc(!sortAsc);
+                      else { setSortKey(key); setSortAsc(false); }
+                      setShowSortDD(false);
+                    }}
+                    style={{
+                      padding: "6px 12px", border: "none", background: "transparent", width: "100%",
+                      textAlign: "left", cursor: "pointer", fontSize: "11px", fontFamily: theme.mono,
+                      color: sortKey === key ? "var(--lime)" : "var(--text)",
+                    }}
+                  >
+                    {SORT_LABELS[key]} {sortKey === key && (sortAsc ? "↑" : "↓")}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "6px", alignItems: "center" }}>
+          <button onClick={() => setShowWatch(true)} style={btnIcon} aria-label="Watchlist">
+            <Eye size={16} color="var(--text-dim)" />
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{ ...btnIcon, background: "var(--lime-dim)" }}
+            aria-label="Add"
+          >
+            <Plus size={16} color="var(--lime)" />
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Position list */}
       <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden", marginTop: "8px" }}>
@@ -321,12 +353,15 @@ export default function App() {
 
       {showAdd && (
         <AddSheet
-          onClose={() => { setShowAdd(false); setPreselectSymbol(null); setActiveTab("portfolio"); }}
-          onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); setActiveTab("portfolio"); }}
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
+          onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); }}
           preselect={preselectSymbol}
         />
       )}
-      <HelpSheet open={showHelp} onClose={() => { setShowHelp(false); setActiveTab("portfolio"); }} />
+      <HelpSheet open={showHelp} onClose={() => { setShowHelp(false); }} />
+      {showWatch && (
+        <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); }} />
+      )}
       <SyncSheet
         open={showSync}
         enabled={syncOn}
@@ -336,8 +371,11 @@ export default function App() {
         onToggle={handleToggleSync}
         onPull={handlePull}
         onPush={handlePush}
-        onClose={() => { setShowSync(false); setActiveTab("portfolio"); }}
+        onClose={() => { setShowSync(false); }}
       />
+      {chartPreview && (
+        <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
+      )}
       <TabBar active={activeTab} onChange={handleTabChange} />
     </div>
   );

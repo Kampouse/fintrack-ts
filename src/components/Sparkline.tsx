@@ -7,6 +7,21 @@ interface Props {
 }
 
 async function fetchMiniBars(symbol: string) {
+  // Stocks: use Finnhub candle API via our proxy
+  if (!symbol.startsWith("BINANCE:")) {
+    try {
+      const url = `/api/candles?symbol=${encodeURIComponent(symbol)}&resolution=5&count=48`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) return null;
+      return data.map((k: { t: number; c: number }) => ({
+        time: new Date(k.t * 1000).toISOString().substring(0, 19),
+        close: k.c,
+      }));
+    } catch { return null; }
+  }
+  // Crypto: use Binance
   const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
   const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=5m&limit=48`;
   const res = await fetch(url);

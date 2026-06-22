@@ -90,9 +90,10 @@ body {
   transform: rotate(-90deg);
 }
 
-/* Bottom sheet slide-up */
+/* Bottom sheet - no animation */
 .sheet-enter {
-  animation: sheetUp 0.3s ease-out forwards;
+}
+.sheet-instant {
 }
 
 @keyframes sheetUp {
@@ -147,3 +148,11 @@ input[type="datetime-local"] {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* Desktop nav at top */
+@media (min-width: 768px) {
+  .app-content {
+    padding-top: 60px !important;
+    padding-bottom: 40px !important;
+  }
+}

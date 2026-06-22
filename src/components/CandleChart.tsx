@@ -75,6 +75,37 @@ interface DrawState {
 }
 
 async function fetchOHLC(symbol: string, days: number) {
+  // Stocks: use Finnhub candle API
+  if (!symbol.startsWith("BINANCE:")) {
+    let resolution = "D";
+    let count = 250;
+    if (days < 0 || days === 0) { resolution = "5"; count = 60; }
+    else if (days <= 1) { resolution = "5"; count = 72; }
+    else if (days <= 7) { resolution = "60"; count = 250; }
+    else if (days <= 30) { resolution = "D"; count = 30; }
+    else { resolution = "D"; count = 250; }
+    const now = Math.floor(Date.now() / 1000);
+    const from = days <= 1 ? now - count * 300 : days <= 7 ? now - count * 3600 : now - count * 86400;
+    try {
+      const res = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (!json?.length) return [];
+      // API returns array of {t, o, h, l, c}
+      return json.map((k: { t: number; o: number; h: number; l: number; c: number; v?: number }) => ({
+        time: resolution === "D"
+          ? new Date(k.t * 1000).toISOString().split("T")[0]
+          : new Date(k.t * 1000).toISOString().substring(0, 19),
+        open: k.o,
+        high: k.h,
+        low: k.l,
+        close: k.c,
+        volume: k.v ?? 0,
+      }));
+    } catch { return []; }
+  }
+
+  // Crypto: Binance
   const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
 
   let interval = "1d";
@@ -784,12 +815,41 @@ export function CandleChart({
 
   // Pointer handlers: move/resize trendlines, crosshair, select
   const handlePointerMove = useCallback((e: React.PointerEvent | React.MouseEvent) => {
-    if (!barsRef.current.length || pinchRef.current.active || panRef.current.active) return;
+    if (!barsRef.current.length) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = (e as React.PointerEvent).clientX - rect.left;
     const y = (e as React.PointerEvent).clientY - rect.top;
+    const bars = barsRef.current;
+
+    // Price axis zoom drag (desktop)
+    if (priceZoomAnchorRef.current && !dragRef.current && !panRef.current.active) {
+      const pe = e as React.PointerEvent;
+      const dy = pe.clientY - priceZoomAnchorRef.current.y;
+      const anchor = priceZoomAnchorRef.current;
+      const origRange = anchor.hi - anchor.lo;
+      const zoomFactor = Math.exp(-dy * 0.005);
+      const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
+      const mid = (anchor.lo + anchor.hi) / 2;
+      priceZoomRef.current = { lo: mid - newRange / 2, hi: mid + newRange / 2 };
+      render(bars, days <= 1, null);
+      return;
+    }
+
+    // Panning (desktop)
+    if (panRef.current.active && (e as React.PointerEvent).buttons === 1) {
+      const dx = (e as React.PointerEvent).clientX - panRef.current.startX;
+      const chartW = rect.width - 60;
+      const barW = chartW / (panRef.current.startView[1] - panRef.current.startView[0]);
+      const shift = Math.round(-dx / barW);
+      const range = panRef.current.startView[1] - panRef.current.startView[0];
+      let newStart = panRef.current.startView[0] + shift;
+      newStart = Math.max(0, Math.min(bars.length - range, newStart));
+      viewRef.current = { start: newStart, end: newStart + range };
+      render(bars, days <= 1, null);
+      return;
+    }
 
     // Dragging a trendline
     if (dragRef.current && (e as React.PointerEvent).buttons === 1) {
@@ -800,11 +860,7 @@ export function CandleChart({
       const dt = data.ts - drag.startTs;
       const dy = data.price - drag.startPrice;
 
-      const updated: TrendLine = {
-        ...orig,
-        startPrice: orig.startPrice + dy,
-        endPrice: orig.endPrice + dy,
-      };
+      const updated: TrendLine = { ...orig };
       if (drag.mode === "start") {
         updated.startTime = orig.startTime + dt;
         updated.startPrice = orig.startPrice + dy;
@@ -839,29 +895,54 @@ export function CandleChart({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const data = pixelToData(x, y);
-    if (!data) return;
 
     // Hit-test trendlines
-    const hit = hitTestTrendline(x, y);
-    if (hit) {
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      setSelectedTlId(hit.tl.id);
-      dragRef.current = {
-        tlId: hit.tl.id,
-        mode: hit.mode,
-        startTs: data.ts,
-        startPrice: data.price,
-        origTl: { ...hit.tl },
+    if (data) {
+      const hit = hitTestTrendline(x, y);
+      if (hit) {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        setSelectedTlId(hit.tl.id);
+        dragRef.current = {
+          tlId: hit.tl.id,
+          mode: hit.mode,
+          startTs: data.ts,
+          startPrice: data.price,
+          origTl: { ...hit.tl },
+        };
+        return;
+      }
+    }
+
+    // Price axis zone: start price zoom drag (desktop)
+    if (x > rect.width - 56) {
+      const s = buildDrawState(
+        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
+        barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
+        priceZoomRef.current
+      );
+      priceZoomAnchorRef.current = {
+        y: e.clientY,
+        lo: s.lo,
+        hi: s.hi,
       };
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
 
-    // Clicked empty space — deselect
+    // Empty space — start pan (desktop)
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setSelectedTlId(null);
     dragRef.current = null;
-  }, [pixelToData, hitTestTrendline]);
+    panRef.current = {
+      active: true,
+      startX: e.clientX,
+      startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
+    };
+  }, [pixelToData, hitTestTrendline, days]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    panRef.current = { active: false, startX: 0, startView: [0, 0] };
+    priceZoomAnchorRef.current = null;
     dragRef.current = null;
     dragTrendlinesRef.current = null;
   }, []);
@@ -1124,6 +1205,8 @@ export function CandleChart({
       >
         <canvas
           ref={canvasRef}
+          draggable={false}
+          onDragStart={e => e.preventDefault()}
           style={{ display: "block", width: "100%", height: "100%" }}
           onPointerMove={handlePointerMove}
           onPointerLeave={handlePointerLeave}

@@ -3,6 +3,14 @@ export function fmtUsd(n: number | null, decimals = 2): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
+export function fmtUsdPrice(n: number | null): string {
+  if (n == null) return "--";
+  if (n >= 1_000) return fmtUsd(n, 0);
+  if (n >= 1) return fmtUsd(n, 2);
+  if (n >= 0.01) return fmtUsd(n, 4);
+  return fmtUsd(n, 6);
+}
+
 export function fmtPct(n: number | null): string {
   if (n == null) return "--";
   const sign = n >= 0 ? "+" : "";

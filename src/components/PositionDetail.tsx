@@ -27,7 +27,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
   const [showAvgs, setShowAvgs] = useState(false);
-  const [chartH, setChartH] = useState(terminal ? 320 : 220);
+  const [chartH, setChartH] = useState(286);
 
   const lots = txs.filter((t) => t.symbol === symbol).sort((a, b) => a.ts - b.ts);
   const label = labelFromSymbol(symbol);
@@ -169,7 +169,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   );
 
   return (
-    <div style={{ maxWidth: terminal ? "100%" : "min(720px, 100%)", margin: "0 auto", padding: "20px 16px 100px" }}>
+    <div style={{ maxWidth: terminal ? "100%" : "min(720px, 100%)", margin: "0 auto", padding: "20px var(--app-hpad, 16px) 100px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
         <button onClick={onBack} style={btnIcon} aria-label="Back">
@@ -236,49 +236,48 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         </div>
       )}
 
+      {/* Chart — rendered once, persists across view switches */}
+      <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
+        <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
+      </div>
+
       {terminal ? (
-        /* Terminal view — full-width chart hero */
+        /* Terminal view — chart above metrics + lots */
         <>
           {metricsRow}
-          <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
-            <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
-          </div>
           {lotsSection}
         </>
       ) : (
-        /* Normal view — chart left, info right */
+        /* Normal view — metrics left, lots below */
         <>
-          <div data-detail-grid style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-            <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-              <div style={{ ...card, padding: '12px 16px' }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                  <div>
-                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
-                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
-                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
-                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
-                      {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
-                    <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+          <div data-detail-row style={{ display: "flex", gap: "var(--app-hpad, 16px)", marginBottom: 16 }}>
+            <div style={{ ...card, flex: 1, padding: '12px 16px' }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
+                    {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
                   </div>
                 </div>
-              </div>
-              <div style={{ ...card, flex: 1 }}>
-                <BasisChart lots={lots} currentPrice={price} />
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+                </div>
               </div>
             </div>
+            <div style={{ ...card, flex: 1 }}>
+              <BasisChart lots={lots} currentPrice={price} />
+            </div>
           </div>
-          <style>{`@media (max-width: 639px) { [data-detail-grid] { grid-template-columns: 1fr !important; } }`}</style>
+          <style>{`@media (max-width: 639px) { [data-detail-row] { flex-direction: column !important; } }`}</style>
           {lotsSection}
         </>
       )}
