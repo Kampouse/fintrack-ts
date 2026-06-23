@@ -1,6 +1,6 @@
-// Cloudflare Pages Function: server-side proxy for Finnhub quotes.
-// The API key lives ONLY here as an environment secret — never sent to the client.
-// Set the secret: npx wrangler pages secret put FINNHUB_KEY --project-name fintrack
+// Cloudflare Pages Function: quote proxy.
+// BINANCE:* symbols → Binance public API (no key, no rate limit).
+// Everything else → Finnhub (key lives in CF secret).
 
 interface Env {
   FINNHUB_KEY: string;
@@ -17,6 +17,78 @@ interface FinnhubRaw {
   t: number | null;
 }
 
+interface BinanceTicker {
+  lastPrice: number;
+  priceChange: number;
+  priceChangePercent: number;
+  highPrice: number;
+  lowPrice: number;
+  openPrice: number;
+  prevClosePrice: number;
+  closeTime: number;
+}
+
+async function fetchBinance(sym: string): Promise<[string, Quote] | null> {
+  // BINANCE:BTCUSDT → BTCUSDT
+  const pair = sym.replace("BINANCE:", "");
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`);
+    if (!res.ok) return null;
+    const d: BinanceTicker = await res.json();
+    return [
+      sym,
+      {
+        price: d.lastPrice,
+        change: d.priceChange,
+        changePct: d.priceChangePercent,
+        high: d.highPrice,
+        low: d.lowPrice,
+        open: d.openPrice,
+        prevClose: d.prevClosePrice,
+        ts: d.closeTime,
+      },
+    ];
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFinnhub(sym: string, key: string): Promise<[string, Quote] | null> {
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${key}`
+    );
+    if (!res.ok) return null;
+    const d: FinnhubRaw = await res.json();
+    return [
+      sym,
+      {
+        price: d.c,
+        change: d.d,
+        changePct: d.dp,
+        high: d.h,
+        low: d.l,
+        open: d.o,
+        prevClose: d.pc,
+        ts: d.t,
+      },
+    ];
+  } catch {
+    return null;
+  }
+}
+
+interface Quote {
+  price: number;
+  change: number | null;
+  changePct: number | null;
+  high: number | null;
+  low: number | null;
+  open: number | null;
+  prevClose: number | null;
+  ts: number | null;
+}
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -29,39 +101,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     });
   }
 
-  const key = env.FINNHUB_KEY;
-  if (!key) {
-    return new Response(JSON.stringify({ error: "Server not configured" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Fetch all symbols in parallel server-side
   const results = await Promise.all(
     symbols.map(async (sym) => {
-      try {
-        const res = await fetch(
-          `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${key}`
-        );
-        if (!res.ok) return [sym, null];
-        const d: FinnhubRaw = await res.json();
-        return [
-          sym,
-          {
-            price: d.c,
-            change: d.d,
-            changePct: d.dp,
-            high: d.h,
-            low: d.l,
-            open: d.o,
-            prevClose: d.pc,
-            ts: d.t,
-          },
-        ] as const;
-      } catch {
-        return [sym, null] as const;
+      if (sym.startsWith("BINANCE:")) {
+        return (await fetchBinance(sym)) ?? [sym, null] as const;
       }
+      const key = env.FINNHUB_KEY;
+      if (!key) return [sym, null] as const;
+      return (await fetchFinnhub(sym, key)) ?? [sym, null] as const;
     })
   );
 

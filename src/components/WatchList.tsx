@@ -1,3 +1,4 @@
+import type { Quote } from "@/types";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Plus, Search } from "lucide-react";
 import { ALL_SYMBOLS, labelFromSymbol, isStock } from "@/lib/constants";
@@ -91,6 +92,9 @@ export function WatchList({ onSelect, onClose, compact }: {
   });
 
   const rowH = compact ? 36 : 44;
+
+  // Batch all quotes in one call instead of per-row
+  const { quotes } = useQuotes(symbols);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: compact ? "100%" : undefined, position: "relative" }}>
@@ -195,28 +199,27 @@ export function WatchList({ onSelect, onClose, compact }: {
           </div>
         )}
         {symbols.map((sym, i) => (
-          <WatchRow key={sym} sym={sym} index={i} onSelect={onSelect} onRemove={removeSymbol} compact={compact} rowH={rowH} />
+          <WatchRow key={sym} sym={sym} index={i} onSelect={onSelect} onRemove={removeSymbol} compact={compact} rowH={rowH} quote={quotes[sym]} />
         ))}
       </div>
     </div>
   );
 }
 
-function WatchRow({ sym, index, onSelect, onRemove, compact, rowH }: {
+function WatchRow({ sym, index, onSelect, onRemove, compact, rowH, quote }: {
   sym: string;
   index: number;
   onSelect?: (symbol: string) => void;
   onRemove: (symbol: string) => void;
   compact?: boolean;
   rowH: number;
+  quote?: Quote;
 }) {
-  const quotes = useQuotes([sym]).quotes;
-  const q = quotes[sym];
   const label = labelFromSymbol(sym);
-  const price = q?.price;
-  const pct = q?.changePct;
-  const high = q?.high;
-  const low = q?.low;
+  const price = quote?.price;
+  const pct = quote?.changePct;
+  const high = quote?.high;
+  const low = quote?.low;
   const isUp = pct != null ? pct >= 0 : null;
   const isBg = index % 2 === 1;
 

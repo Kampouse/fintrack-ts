@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
+import { fetchVolumeProfile, type VPRow } from "@/api/kiyotaka";
 
 export interface PriceLevel {
   price: number;
@@ -38,6 +39,19 @@ const TF = [
 ] as const;
 
 const TL_COLORS = ["#ff6b6b", "#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#fb923c", "#67e8f9"];
+
+function fmtPrice(p: number): string {
+  if (p >= 1000) return p.toFixed(0);
+  if (p >= 1) return p.toFixed(2);
+  return p.toFixed(4);
+}
+
+function fmtVol(v: number): string {
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + "B";
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toFixed(0);
+}
 
 interface Bar {
   time: string;
@@ -147,12 +161,103 @@ function parseTime(t: string) {
 
 function computeSMA(bars: Bar[], period: number): Map<number, number> {
   const sma = new Map<number, number>();
-  for (let i = period - 1; i < bars.length; i++) {
-    let sum = 0;
-    for (let j = i - period + 1; j <= i; j++) sum += bars[j].close;
-    sma.set(i, sum / period);
+  if (bars.length < period) return sma;
+  let sum = 0;
+  for (let i = 0; i < bars.length; i++) {
+    sum += bars[i].close;
+    if (i >= period - 1) {
+      sma.set(i, sum / period);
+      sum -= bars[i - period + 1].close;
+    }
   }
   return sma;
+}
+
+function computeEMA(bars: Bar[], period: number): Map<number, number> {
+  const ema = new Map<number, number>();
+  if (bars.length < period) return ema;
+  const k = 2 / (period + 1);
+  // Seed with SMA
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += bars[i].close;
+  ema.set(period - 1, sum / period);
+  for (let i = period; i < bars.length; i++) {
+    const prev = ema.get(i - 1)!;
+    ema.set(i, bars[i].close * k + prev * (1 - k));
+  }
+  return ema;
+}
+
+function computeMACD(bars: Bar[]): { macd: Map<number, number>; signal: Map<number, number>; histogram: Map<number, number> } {
+  const ema12 = computeEMA(bars, 12);
+  const ema26 = computeEMA(bars, 26);
+  const macd = new Map<number, number>();
+  const macdLine: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    const v12 = ema12.get(i);
+    const v26 = ema26.get(i);
+    if (v12 != null && v26 != null) {
+      const val = v12 - v26;
+      macd.set(i, val);
+      macdLine.push(val);
+    } else {
+      macdLine.push(0);
+    }
+  }
+  // Signal: 9-period EMA of MACD line
+  const signal = new Map<number, number>();
+  if (macdLine.length >= 9) {
+    const k = 2 / 10;
+    let sum = 0;
+    for (let j = 0; j < 9; j++) sum += macdLine[j];
+    signal.set(25, sum / 9); // first signal at index 25 (where ema26 starts)
+    for (let i = 26; i < bars.length; i++) {
+      const prev = signal.get(i - 1) ?? 0;
+      signal.set(i, macdLine[i] * k + prev * (1 - k));
+    }
+  }
+  const histogram = new Map<number, number>();
+  for (const [i, m] of macd) {
+    const s = signal.get(i);
+    if (s != null) histogram.set(i, m - s);
+  }
+  return { macd, signal, histogram };
+}
+
+function computeRSI(bars: Bar[], period = 14): Map<number, number> {
+  const rsi = new Map<number, number>();
+  if (bars.length < period + 1) return rsi;
+  let gainSum = 0, lossSum = 0;
+  for (let i = 1; i <= period; i++) {
+    const delta = bars[i].close - bars[i - 1].close;
+    if (delta > 0) gainSum += delta; else lossSum -= delta;
+  }
+  let avgGain = gainSum / period;
+  let avgLoss = lossSum / period;
+  rsi.set(period, avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  for (let i = period + 1; i < bars.length; i++) {
+    const delta = bars[i].close - bars[i - 1].close;
+    avgGain = (avgGain * (period - 1) + (delta > 0 ? delta : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (delta < 0 ? -delta : 0)) / period;
+    rsi.set(i, avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  }
+  return rsi;
+}
+
+function computeZScore(bars: Bar[], period = 20): Map<number, number> {
+  const z = new Map<number, number>();
+  if (bars.length < period) return z;
+  const closes = bars.map(b => b.close);
+  for (let i = period - 1; i < bars.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+    const mean = sum / period;
+    let sumSq = 0;
+    for (let j = i - period + 1; j <= i; j++) sumSq += (closes[j] - mean) ** 2;
+    const std = Math.sqrt(sumSq / period);
+    z.set(i, std === 0 ? 0 : (closes[i] - mean) / std);
+  }
+  return z;
 }
 
 function buildDrawState(
@@ -224,6 +329,58 @@ function buildDrawState(
   };
 }
 
+function drawVolumeProfile(
+  ctx: CanvasRenderingContext2D,
+  s: DrawState,
+  vpData: VPRow[],
+) {
+  if (!vpData.length) return;
+  const { padLeft, padTop, chartH, chartW, lo, hi, priceToY } = s;
+  const rightEdgeX = chartW + padLeft;
+
+  // Find max total volume for scaling
+  let maxVol = 0;
+  for (const row of vpData) {
+    const total = row.buy + row.sell;
+    if (total > maxVol) maxVol = total;
+  }
+  if (maxVol === 0) return;
+
+  // Bar height: map VP price step (~$3) to pixel height
+  // Get the pixel span for one VP price step
+  const vpStep = vpData.length > 1 ? vpData[1].price - vpData[0].price : 3;
+  const barH = Math.max(1, Math.abs(priceToY(vpData[0].price) - priceToY(vpData[0].price + vpStep)));
+
+  // Max bar width = 25% of chart width (so candles remain readable)
+  const vpWidth = chartW * 0.25;
+
+  for (const row of vpData) {
+    if (row.price < lo || row.price > hi) continue;
+    const y = priceToY(row.price);
+    const barTop = y - barH / 2;
+    if (barTop < padTop || barTop + barH > padTop + chartH) continue;
+
+    const total = row.buy + row.sell;
+    const buyRatio = row.buy / total;
+    const barW = Math.max(1, (total / maxVol) * vpWidth);
+    const buyW = barW * buyRatio;
+    const sellW = barW - buyW;
+
+    const x = rightEdgeX - barW;
+
+    // Sell side (left portion)
+    if (sellW > 0) {
+      ctx.fillStyle = "rgba(248,113,113,0.18)";
+      ctx.fillRect(x, barTop, sellW, barH);
+    }
+    // Buy side (right portion)
+    if (buyW > 0) {
+      ctx.fillStyle = "rgba(83,255,132,0.18)";
+      ctx.fillRect(x + sellW, barTop, buyW, barH);
+    }
+  }
+}
+
 function drawChart(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -238,6 +395,7 @@ function drawChart(
   drawingLine: never | null,  // no longer used
   selectedTlId: number | null,
   priceOverride?: { lo: number; hi: number } | null,
+  vpData?: VPRow[],
 ) {
   const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
@@ -267,6 +425,11 @@ function drawChart(
   for (let i = 1; i <= 3; i++) {
     const y = padTop + (chartH / 4) * i;
     ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
+  }
+
+  // Volume Profile (behind candles)
+  if (vpData?.length) {
+    drawVolumeProfile(ctx, s, vpData);
   }
 
   // Trendlines (drawn behind candles)
@@ -322,15 +485,14 @@ function drawChart(
   ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.beginPath(); ctx.moveTo(padLeft, volBase); ctx.lineTo(w - padRight, volBase); ctx.stroke();
 
-  // SMAs
-  const sma20 = computeSMA(bars, Math.min(20, Math.floor(bars.length / 3)));
-  const show200 = bars.length >= 200;
-  const sma200 = show200 ? computeSMA(bars, 200) : new Map();
-  const smas: { color: string; map: Map<number, number> }[] = [
-    { color: "rgba(255,255,100,0.4)", map: sma20 },
-    ...(show200 ? [{ color: "rgba(147,130,220,0.55)", map: sma200 }] : []),
+  // EMAs
+  const ema20 = computeEMA(bars, 20);
+  const ema50 = computeEMA(bars, 50);
+  const emas: { color: string; map: Map<number, number>; label: string }[] = [
+    { color: "rgba(255,255,100,0.5)", map: ema20, label: "EMA 20" },
+    { color: "rgba(147,130,220,0.6)", map: ema50, label: "EMA 50" },
   ];
-  for (const { color, map } of smas) {
+  for (const { color, map } of emas) {
     if (map.size > 1) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1;
@@ -349,7 +511,7 @@ function drawChart(
     }
   }
 
-  // Candlesticks
+  // Candlesticks with wick glow
   for (let i = 0; i < visibleBars.length; i++) {
     const b = visibleBars[i];
     const x = padLeft + barWidth * i + barWidth / 2;
@@ -358,6 +520,17 @@ function drawChart(
     const bodyTop = priceToY(Math.max(b.open, b.close));
     const bodyBot = priceToY(Math.min(b.open, b.close));
     const bodyH = Math.max(1, bodyBot - bodyTop);
+
+    // Subtle wick glow
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(x, priceToY(b.high));
+    ctx.lineTo(x, priceToY(b.low));
+    ctx.stroke();
+    ctx.restore();
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
@@ -479,16 +652,15 @@ function drawChart(
     }
   }
 
-  // MA legend
-  if (smas.length > 0) {
+  // EMA legend
+  if (emas.length > 0) {
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     let legendX = padLeft + 4;
     const legendY = padTop + 2;
-    smas.forEach(({ color }, idx) => {
+    emas.forEach(({ color, label }) => {
       ctx.fillStyle = color;
-      const label = idx === 0 ? "SMA20" : "SMA200";
       ctx.fillText(label, legendX, legendY);
       legendX += ctx.measureText(label).width + 10;
     });
@@ -539,6 +711,225 @@ function drawChart(
   ctx.beginPath(); ctx.moveTo(w - padRight, padTop); ctx.lineTo(w - padRight, h - padBottom); ctx.stroke();
 }
 
+function drawIndicator(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  bars: Bar[],
+  viewStart: number,
+  viewEnd: number,
+  type: "macd" | "rsi" | "zscore",
+  subDaily: boolean,
+) {
+  ctx.clearRect(0, 0, w, h);
+  const padRight = 56;
+  const padLeft = 4;
+  const padTop = 4;
+  const padBottom = 18;
+  const chartW = w - padLeft - padRight;
+  const chartH = h - padTop - padBottom;
+
+  if (chartW < 20 || chartH < 10 || !bars.length) return;
+
+  const vs = Math.max(0, Math.min(viewStart, bars.length - 1));
+  const ve = Math.max(1, Math.min(viewEnd, bars.length));
+  const barWidth = chartW / (ve - vs);
+
+  // Separator
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx.beginPath(); ctx.moveTo(padLeft, padTop); ctx.lineTo(w - padRight, padTop); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(w - padRight, padTop); ctx.lineTo(w - padRight, h - padBottom); ctx.stroke();
+
+  if (type === "rsi") {
+    const rsi = computeRSI(bars);
+    if (rsi.size < 2) return;
+
+    // Overbought/oversold zones
+    const yToVal = (y: number) => 100 - ((y - padTop) / chartH) * 100;
+    const valToY = (v: number) => padTop + chartH - (v / 100) * chartH;
+
+    // 70/30 zones
+    ctx.fillStyle = "rgba(248,113,113,0.04)";
+    ctx.fillRect(padLeft, valToY(100), chartW, valToY(70) - valToY(100));
+    ctx.fillStyle = "rgba(83,255,132,0.04)";
+    ctx.fillRect(padLeft, valToY(30), chartW, valToY(0) - valToY(30));
+
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 0.5;
+    for (const v of [70, 30, 50]) {
+      const y = valToY(v);
+      ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // RSI line
+    ctx.strokeStyle = "rgba(168,85,247,0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let started = false;
+    for (let i = vs; i < ve; i++) {
+      const val = rsi.get(i);
+      if (val == null) continue;
+      const x = padLeft + (i - vs + 0.5) * barWidth;
+      const y = valToY(val);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Labels
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const v of [30, 50, 70]) {
+      ctx.fillText(v.toString(), w - padRight + 6, valToY(v));
+    }
+
+    // Legend
+    ctx.fillStyle = "rgba(168,85,247,0.6)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("RSI 14", padLeft + 4, padTop + 1);
+
+  } else if (type === "macd") {
+    // MACD
+    const { macd, signal, histogram } = computeMACD(bars);
+    if (macd.size < 2) return;
+
+    let minV = Infinity, maxV = -Infinity;
+    for (const v of macd.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    for (const v of signal.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    for (const v of histogram.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+    const range = maxV - minV || 1;
+    const pad = range * 0.1;
+    minV -= pad; maxV += pad;
+    const totalRange = maxV - minV;
+    const valToY = (v: number) => padTop + chartH - ((v - minV) / totalRange) * chartH;
+    const zeroY = valToY(0);
+
+    // Zero line
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(padLeft, zeroY); ctx.lineTo(w - padRight, zeroY); ctx.stroke();
+
+    // Histogram
+    for (let i = vs; i < ve; i++) {
+      const v = histogram.get(i);
+      if (v == null) continue;
+      const x = padLeft + (i - vs + 0.5) * barWidth;
+      const y1 = valToY(0);
+      const y2 = valToY(v);
+      ctx.fillStyle = v >= 0 ? "rgba(83,255,132,0.3)" : "rgba(248,113,113,0.3)";
+      ctx.fillRect(x - barWidth * 0.3, Math.min(y1, y2), barWidth * 0.6, Math.abs(y2 - y1));
+    }
+
+    // MACD line
+    ctx.strokeStyle = "rgba(56,189,248,0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let started = false;
+    for (let i = vs; i < ve; i++) {
+      const val = macd.get(i);
+      if (val == null) continue;
+      const x = padLeft + (i - vs + 0.5) * barWidth;
+      const y = valToY(val);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Signal line
+    ctx.strokeStyle = "rgba(251,191,36,0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    started = false;
+    for (let i = vs; i < ve; i++) {
+      const val = signal.get(i);
+      if (val == null) continue;
+      const x = padLeft + (i - vs + 0.5) * barWidth;
+      const y = valToY(val);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Labels
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("0", w - padRight + 6, zeroY);
+
+    // Legend
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(56,189,248,0.6)";
+    ctx.fillText("MACD", padLeft + 4, padTop + 1);
+    ctx.fillStyle = "rgba(251,191,36,0.6)";
+    ctx.fillText("Signal", padLeft + 42, padTop + 1);
+  } else {
+    // Z-Score
+    const zscore = computeZScore(bars);
+    if (zscore.size < 2) return;
+
+    const range = 5; // -3 to +3 is typical, pad to ±4
+    const valToY = (v: number) => padTop + chartH - ((v + range) / (2 * range)) * chartH;
+
+    // ±2 zones (overbought/oversold)
+    ctx.fillStyle = "rgba(248,113,113,0.04)";
+    ctx.fillRect(padLeft, valToY(range), chartW, valToY(2) - valToY(range));
+    ctx.fillStyle = "rgba(83,255,132,0.04)";
+    ctx.fillRect(padLeft, valToY(-2), chartW, valToY(-range) - valToY(-2));
+
+    // Grid lines at ±1, ±2, 0
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 0.5;
+    for (const v of [-2, -1, 0, 1, 2]) {
+      const y = valToY(v);
+      ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Zero line (stronger)
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 0.8;
+    const zeroY = valToY(0);
+    ctx.beginPath(); ctx.moveTo(padLeft, zeroY); ctx.lineTo(w - padRight, zeroY); ctx.stroke();
+
+    // Z-score line
+    ctx.strokeStyle = "rgba(251,191,36,0.8)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    let started = false;
+    for (let i = vs; i < ve; i++) {
+      const val = zscore.get(i);
+      if (val == null) continue;
+      const x = padLeft + (i - vs + 0.5) * barWidth;
+      const y = valToY(Math.max(-range, Math.min(range, val)));
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Labels
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const v of [-2, 0, 2]) {
+      ctx.fillText(v.toString(), w - padRight + 6, valToY(v));
+    }
+
+    // Legend
+    ctx.fillStyle = "rgba(251,191,36,0.6)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("Z-Score 20", padLeft + 4, padTop + 1);
+  }
+}
+
 export function CandleChart({
   symbol,
   height = 220,
@@ -551,6 +942,7 @@ export function CandleChart({
   onTrendlineRemove,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const indicatorCanvasRef = useRef<HTMLCanvasElement>(null);
   const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
   const hasLoaded = useRef(false);
@@ -558,6 +950,9 @@ export function CandleChart({
   const [empty, setEmpty] = useState(false);
   const [internalTrendlines, setInternalTrendlines] = useState<TrendLine[]>([]);
   const [selectedTlId, setSelectedTlId] = useState<number | null>(null);
+  const [indicator, setIndicator] = useState<"none" | "macd" | "rsi" | "zscore">("none");
+  const [showVP, setShowVP] = useState(false);
+  const vpDataRef = useRef<VPRow[]>([]);
   const nextIdRef = useRef(1);
   const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
   const priceZoomAnchorRef = useRef<{ y: number; lo: number; hi: number } | null>(null);
@@ -726,8 +1121,23 @@ export function CandleChart({
     const ve = v.end === 0 ? bars.length : v.end;
 
     const tls = dragTrendlinesRef.current ?? activeTrendlines;
-    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current);
-  }, [priceLevels, activeTrendlines, selectedTlId]);
+    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current);
+
+    // Draw indicator panel
+    if (indicator !== "none") {
+      const indCanvas = indicatorCanvasRef.current;
+      if (indCanvas) {
+        const indRect = indCanvas.getBoundingClientRect();
+        indCanvas.width = indRect.width * dpr;
+        indCanvas.height = indRect.height * dpr;
+        const indCtx = indCanvas.getContext("2d");
+        if (indCtx) {
+          indCtx.scale(dpr, dpr);
+          drawIndicator(indCtx, indRect.width, indRect.height, bars, vs, ve, indicator, subDaily);
+        }
+      }
+    }
+  }, [priceLevels, activeTrendlines, selectedTlId, indicator]);
 
   // Keep a ref to latest render so the fetch effect doesn't re-fire on trendline changes
   const renderRef = useRef(render);
@@ -794,6 +1204,30 @@ export function CandleChart({
     if (canvasRef.current) observer.observe(canvasRef.current);
     return () => { observer.disconnect(); cancelAnimationFrame(raf); };
   }, [canChart, days, render]);
+
+  // Volume Profile fetch (crypto only)
+  useEffect(() => {
+    if (!showVP || !symbol.startsWith("BINANCE:") || !barsRef.current.length) {
+      vpDataRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    const bars = barsRef.current;
+    const loadVP = () => {
+      const from = Math.floor(parseTime(bars[0].time) / 1000);
+      const to = Math.floor(parseTime(bars[bars.length - 1].time) / 1000);
+      const resMap: Record<string, string> = { "1": "5", "5": "5", "15": "15", "60": "60", "D": "60" };
+      fetchVolumeProfile(symbol, resMap[String(days)] || "60", from, to + 300)
+        .then((data) => {
+          if (cancelled) return;
+          vpDataRef.current = data;
+          if (barsRef.current.length) render(barsRef.current, days <= 1);
+        });
+    };
+    loadVP();
+    const interval = setInterval(loadVP, 60_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [showVP, symbol, days, canChart, render]);
 
   // Chart resize via drag handle
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -1156,7 +1590,7 @@ export function CandleChart({
             {t.label}
           </button>
         ))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
           <button
             onClick={handleCreateTrendline}
             style={{
@@ -1189,6 +1623,72 @@ export function CandleChart({
           >
             Del
           </button>
+          <button
+            onClick={() => setIndicator(indicator === "macd" ? "none" : "macd")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: indicator === "macd" ? "rgba(56,189,248,0.12)" : "transparent",
+              color: indicator === "macd" ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            MACD
+          </button>
+          <button
+            onClick={() => setIndicator(indicator === "rsi" ? "none" : "rsi")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: indicator === "rsi" ? "rgba(168,85,247,0.12)" : "transparent",
+              color: indicator === "rsi" ? "rgba(168,85,247,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            RSI
+          </button>
+          <button
+            onClick={() => setIndicator(indicator === "zscore" ? "none" : "zscore")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "none",
+              background: indicator === "zscore" ? "rgba(251,191,36,0.12)" : "transparent",
+              color: indicator === "zscore" ? "rgba(251,191,36,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            Z
+          </button>
+          {symbol.startsWith("BINANCE:") && (
+            <button
+              onClick={() => setShowVP(v => !v)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "none",
+                background: showVP ? "rgba(132,204,22,0.12)" : "transparent",
+                color: showVP ? "rgba(163,230,53,0.8)" : "var(--text-dim)",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "ui-monospace, SFMono-Regular, monospace",
+              }}
+            >
+              VP
+            </button>
+          )}
         </div>
       </div>
       <div
@@ -1239,6 +1739,23 @@ export function CandleChart({
           }}>No chart data</div>
         )}
       </div>
+      {/* Indicator panel */}
+      {indicator !== "none" && (
+        <div style={{
+          borderRadius: "0 0 12px 12px",
+          overflow: "hidden",
+          background: "rgba(255,255,255,0.02)",
+          height: 80,
+          borderTop: "1px solid rgba(255,255,255,0.04)",
+        }}>
+          <canvas
+            ref={indicatorCanvasRef}
+            draggable={false}
+            onDragStart={e => e.preventDefault()}
+            style={{ display: "block", width: "100%", height: "100%" }}
+          />
+        </div>
+      )}
       {resizable && (
         <div
           onPointerDown={handleResizeStart}

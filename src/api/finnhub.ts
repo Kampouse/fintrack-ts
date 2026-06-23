@@ -26,8 +26,45 @@ export async function searchSymbols(q: string): Promise<SearchResult[]> {
 
 export async function getQuotes(symbols: string[]): Promise<Record<string, Quote>> {
   if (symbols.length === 0) return {};
-  const params = symbols.map((s) => `symbol=${encodeURIComponent(s)}`).join("&");
-  const res = await fetch(`/api/quotes?${params}`);
-  if (!res.ok) throw new Error(`Quotes batch failed: ${res.status}`);
-  return res.json();
+  
+  // Split: BINANCE:* → client-side fetch (Binance has CORS), rest → our proxy
+  const binanceSyms = symbols.filter(s => s.startsWith("BINANCE:"));
+  const finnhubSyms = symbols.filter(s => !s.startsWith("BINANCE:"));
+  
+  const results: Record<string, Quote> = {};
+  
+  // Binance: client-side (CORS allowed, no key needed)
+  if (binanceSyms.length > 0) {
+    const pairs = binanceSyms.map(s => s.replace("BINANCE:", ""));
+    const batchUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(pairs)}`;
+    const batchRes = await fetch(batchUrl);
+    if (batchRes.ok) {
+      const tickers = await batchRes.json();
+      for (const t of tickers) {
+        const sym = `BINANCE:${t.symbol}`;
+        results[sym] = {
+          price: Number(t.lastPrice),
+          change: Number(t.priceChange),
+          changePct: Number(t.priceChangePercent),
+          high: Number(t.highPrice),
+          low: Number(t.lowPrice),
+          open: Number(t.openPrice),
+          prevClose: Number(t.prevClosePrice),
+          ts: Number(t.closeTime),
+        };
+      }
+    }
+  }
+  
+  // Non-Binance: server-side proxy (Finnhub key hidden)
+  if (finnhubSyms.length > 0) {
+    const params = finnhubSyms.map((s) => `symbol=${encodeURIComponent(s)}`).join("&");
+    const res = await fetch(`/api/quotes?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      Object.assign(results, data);
+    }
+  }
+  
+  return results;
 }
