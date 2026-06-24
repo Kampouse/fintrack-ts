@@ -4,9 +4,8 @@ import type { Quote } from "@/types";
 // The Finnhub key lives only server-side in the Cloudflare Pages secret.
 
 export async function getQuote(symbol: string): Promise<Quote> {
-  const res = await fetch(`/api/quotes?symbol=${encodeURIComponent(symbol)}`);
-  if (!res.ok) throw new Error(`Quote failed: ${res.status}`);
-  const data: Record<string, Quote> = await res.json();
+  // Delegate to getQuotes which handles Binance (crypto) vs Finnhub (stocks) routing
+  const data = await getQuotes([symbol]);
   return data[symbol] ?? { price: 0, change: null, changePct: null, high: null, low: null, open: null, prevClose: null, ts: null };
 }
 

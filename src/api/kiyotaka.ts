@@ -20,3 +20,26 @@ export async function fetchVolumeProfile(
   if (!res.ok) return [];
   return res.json();
 }
+
+export interface OrderbookLevel {
+  price: number;
+  volume: number;
+}
+
+export interface OrderbookSnapshot {
+  bids: OrderbookLevel[];
+  asks: OrderbookLevel[];
+  timestamp: number;
+}
+
+export async function fetchOrderbook(
+  symbol: string,
+  maxDepth = 500,
+): Promise<OrderbookSnapshot> {
+  if (!symbol.startsWith("BINANCE:")) return { bids: [], asks: [], timestamp: 0 };
+  const res = await fetch(
+    `/api/kiyotaka/orderbook?symbol=${encodeURIComponent(symbol)}&maxDepth=${maxDepth}`,
+  );
+  if (!res.ok) return { bids: [], asks: [], timestamp: 0 };
+  return res.json();
+}

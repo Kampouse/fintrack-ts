@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
-import { fetchVolumeProfile, type VPRow } from "@/api/kiyotaka";
+import { fetchVolumeProfile, type VPRow, fetchOrderbook, type OrderbookSnapshot, type OrderbookLevel } from "@/api/kiyotaka";
 
 export interface PriceLevel {
   price: number;
@@ -381,6 +381,199 @@ function drawVolumeProfile(
   }
 }
 
+// Heatmap color: intensity 0..1 -> green (bid) or red (ask)
+function obHeatColor(volume: number, maxVol: number, isBid: boolean): string {
+  const intensity = Math.min(1, Math.sqrt(volume / maxVol));
+  const alpha = 0.15 + intensity * 0.65;
+  return isBid
+    ? `rgba(83,255,132,${alpha.toFixed(3)})`
+    : `rgba(248,113,113,${alpha.toFixed(3)})`;
+}
+
+function drawOrderbookHeatmap(
+  ctx: CanvasRenderingContext2D,
+  s: DrawState,
+  obData: OrderbookSnapshot | null,
+) {
+  if (!obData || (!obData.bids.length && !obData.asks.length)) return;
+  const { padLeft, padTop, chartH, chartW, lo, hi, priceToY } = s;
+
+  let maxVol = 0;
+  for (const lvl of [...obData.bids, ...obData.asks]) {
+    if (lvl.volume > maxVol) maxVol = lvl.volume;
+  }
+  if (maxVol === 0) return;
+
+  const rightEdge = padLeft + chartW;
+  const obWidth = chartW * 0.35;
+  const allLevels = [...obData.bids, ...obData.asks];
+  if (allLevels.length < 2) return;
+
+  const prices = allLevels.map(l => l.price).sort((a, b) => a - b);
+  const priceStep = prices.length > 1 ? prices[1] - prices[0] : 1;
+  const barH = Math.max(1.5, Math.abs(priceToY(prices[0]) - priceToY(prices[0] + priceStep)));
+
+  const bidSet = new Set(obData.bids);
+
+  for (const lvl of allLevels) {
+    if (lvl.price < lo || lvl.price > hi) continue;
+    const y = priceToY(lvl.price);
+    const barTop = y - barH / 2;
+    if (barTop < padTop - barH || barTop > padTop + chartH) continue;
+
+    const isBid = bidSet.has(lvl);
+    const barW = Math.max(2, (lvl.volume / maxVol) * obWidth);
+
+    ctx.fillStyle = obHeatColor(lvl.volume, maxVol, isBid);
+    // Draw from right edge going left
+    ctx.fillRect(rightEdge - barW, barTop, barW, barH + 0.5);
+  }
+
+  // Label
+  ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText("OB Depth", rightEdge - 4, padTop + 2);
+  ctx.textAlign = "left";
+}
+
+function drawDepthChart(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  obData: OrderbookSnapshot | null,
+) {
+  ctx.clearRect(0, 0, w, h);
+
+  const padRight = 56;
+  const padLeft = 4;
+  const padTop = 4;
+  const padBottom = 4;
+  const chartW = w - padLeft - padRight;
+  const chartH = h - padTop - padBottom;
+
+  if (chartW < 20 || chartH < 10 || !obData) return;
+
+  // Background fill
+  ctx.fillStyle = "rgba(255,255,255,0.015)";
+  ctx.fillRect(padLeft, padTop, chartW, chartH);
+
+  if (!obData.bids.length && !obData.asks.length) return;
+
+  // Build cumulative depth
+  const bids = [...obData.bids].sort((a, b) => b.price - a.price); // descending from mid
+  const asks = [...obData.asks].sort((a, b) => a.price - b.price); // ascending from mid
+
+  let cumBid = 0;
+  const bidCurve: { price: number; cum: number }[] = [];
+  for (const b of bids) { cumBid += b.volume; bidCurve.push({ price: b.price, cum: cumBid }); }
+
+  let cumAsk = 0;
+  const askCurve: { price: number; cum: number }[] = [];
+  for (const a of asks) { cumAsk += a.volume; askCurve.push({ price: a.price, cum: cumAsk }); }
+
+  const maxCum = Math.max(cumBid, cumAsk);
+  if (maxCum === 0) return;
+
+  // Price range: compute from OB data itself, zoom around mid price
+  const midPrice = (bids[0]?.price + asks[0]?.price) / 2;
+  // Use the price spread of the inner ~80% of levels to determine visible range
+  const allPrices = [...bids.map(b => b.price), ...asks.map(a => a.price)].sort((a, b) => a - b);
+  const p5 = allPrices[Math.floor(allPrices.length * 0.05)] ?? midPrice;
+  const p95 = allPrices[Math.floor(allPrices.length * 0.95)] ?? midPrice;
+  const dataSpread = Math.max(p95 - p5, midPrice * 0.001); // at least 0.1% of price
+  const lo = midPrice - dataSpread;
+  const hi = midPrice + dataSpread;
+  const totalRange = hi - lo || 1;
+
+  const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
+  const cumToX = (c: number) => padLeft + (c / maxCum) * chartW;
+
+  // Draw cumulative bid area (green) — step curve for classic depth look
+  if (bidCurve.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(padLeft, priceToY(bidCurve[0].price));
+    for (let i = 0; i < bidCurve.length; i++) {
+      const pt = bidCurve[i];
+      const x = cumToX(pt.cum);
+      const y = priceToY(pt.price);
+      if (i > 0) {
+        ctx.lineTo(x, priceToY(bidCurve[i - 1].price));
+      }
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(padLeft, priceToY(bidCurve[bidCurve.length - 1].price));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(83,255,132,0.18)";
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(83,255,132,0.8)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cumToX(bidCurve[0].cum), priceToY(bidCurve[0].price));
+    for (let i = 1; i < bidCurve.length; i++) {
+      const pt = bidCurve[i];
+      ctx.lineTo(cumToX(pt.cum), priceToY(bidCurve[i - 1].price));
+      ctx.lineTo(cumToX(pt.cum), priceToY(pt.price));
+    }
+    ctx.stroke();
+  }
+
+  // Draw cumulative ask area (red)
+  if (askCurve.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(padLeft, priceToY(askCurve[0].price));
+    for (let i = 0; i < askCurve.length; i++) {
+      const pt = askCurve[i];
+      const x = cumToX(pt.cum);
+      const y = priceToY(pt.price);
+      if (i > 0) {
+        ctx.lineTo(x, priceToY(askCurve[i - 1].price));
+      }
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(padLeft, priceToY(askCurve[askCurve.length - 1].price));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(248,113,113,0.18)";
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(248,113,113,0.8)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cumToX(askCurve[0].cum), priceToY(askCurve[0].price));
+    for (let i = 1; i < askCurve.length; i++) {
+      const pt = askCurve[i];
+      ctx.lineTo(cumToX(pt.cum), priceToY(askCurve[i - 1].price));
+      ctx.lineTo(cumToX(pt.cum), priceToY(pt.price));
+    }
+    ctx.stroke();
+  }
+
+  // Mid price line
+  const midY = priceToY(midPrice);
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.setLineDash([2, 3]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, midY);
+  ctx.lineTo(padLeft + chartW, midY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Legend
+  ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const bidShare = (cumBid / (cumBid + cumAsk) * 100).toFixed(0);
+  ctx.fillStyle = "rgba(83,255,132,0.8)";
+  ctx.fillText(`B ${fmtVol(cumBid)}`, padLeft + 4, padTop + 1);
+  ctx.fillStyle = "rgba(248,113,113,0.8)";
+  ctx.fillText(`A ${fmtVol(cumAsk)}`, padLeft + 70, padTop + 1);
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.fillText(`${bidShare}% bid`, padLeft + 130, padTop + 1);
+}
+
 function drawChart(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -396,6 +589,7 @@ function drawChart(
   selectedTlId: number | null,
   priceOverride?: { lo: number; hi: number } | null,
   vpData?: VPRow[],
+  obData?: OrderbookSnapshot | null,
 ) {
   const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
@@ -549,6 +743,11 @@ function drawChart(
       ctx.lineWidth = 1;
       ctx.strokeRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyH);
     }
+  }
+
+  // Orderbook depth heatmap (ON TOP of candles, right side overlay)
+  if (obData) {
+    drawOrderbookHeatmap(ctx, s, obData);
   }
 
   // Current price line
@@ -953,6 +1152,9 @@ export function CandleChart({
   const [indicator, setIndicator] = useState<"none" | "macd" | "rsi" | "zscore">("none");
   const [showVP, setShowVP] = useState(false);
   const vpDataRef = useRef<VPRow[]>([]);
+  const [showOB, setShowOB] = useState(false);
+  const obDataRef = useRef<OrderbookSnapshot | null>(null);
+  const depthCanvasRef = useRef<HTMLCanvasElement>(null);
   const nextIdRef = useRef(1);
   const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
   const priceZoomAnchorRef = useRef<{ y: number; lo: number; hi: number } | null>(null);
@@ -1121,7 +1323,7 @@ export function CandleChart({
     const ve = v.end === 0 ? bars.length : v.end;
 
     const tls = dragTrendlinesRef.current ?? activeTrendlines;
-    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current);
+    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current, obDataRef.current);
 
     // Draw indicator panel
     if (indicator !== "none") {
@@ -1137,7 +1339,22 @@ export function CandleChart({
         }
       }
     }
-  }, [priceLevels, activeTrendlines, selectedTlId, indicator]);
+
+    // Draw depth chart panel
+    if (showOB) {
+      const depthCanvas = depthCanvasRef.current;
+      if (depthCanvas) {
+        const dRect = depthCanvas.getBoundingClientRect();
+        depthCanvas.width = dRect.width * dpr;
+        depthCanvas.height = dRect.height * dpr;
+        const dCtx = depthCanvas.getContext("2d");
+        if (dCtx) {
+          dCtx.scale(dpr, dpr);
+          drawDepthChart(dCtx, dRect.width, dRect.height, obDataRef.current);
+        }
+      }
+    }
+  }, [priceLevels, activeTrendlines, selectedTlId, indicator, showOB]);
 
   // Keep a ref to latest render so the fetch effect doesn't re-fire on trendline changes
   const renderRef = useRef(render);
@@ -1228,6 +1445,25 @@ export function CandleChart({
     const interval = setInterval(loadVP, 60_000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [showVP, symbol, days, canChart, render]);
+
+  // Orderbook depth fetch (crypto only)
+  useEffect(() => {
+    if (!showOB || !symbol.startsWith("BINANCE:") || !barsRef.current.length) {
+      obDataRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const loadOB = () => {
+      fetchOrderbook(symbol, 500).then((data) => {
+        if (cancelled) return;
+        obDataRef.current = data;
+        if (barsRef.current.length) render(barsRef.current, days <= 1);
+      });
+    };
+    loadOB();
+    const interval = setInterval(loadOB, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [showOB, symbol, days, canChart, render]);
 
   // Chart resize via drag handle
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -1689,6 +1925,24 @@ export function CandleChart({
               VP
             </button>
           )}
+          {symbol.startsWith("BINANCE:") && (
+            <button
+              onClick={() => setShowOB(v => !v)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "none",
+                background: showOB ? "rgba(56,189,248,0.12)" : "transparent",
+                color: showOB ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "ui-monospace, SFMono-Regular, monospace",
+              }}
+            >
+              OB
+            </button>
+          )}
         </div>
       </div>
       <div
@@ -1750,6 +2004,23 @@ export function CandleChart({
         }}>
           <canvas
             ref={indicatorCanvasRef}
+            draggable={false}
+            onDragStart={e => e.preventDefault()}
+            style={{ display: "block", width: "100%", height: "100%" }}
+          />
+        </div>
+      )}
+      {/* Orderbook depth chart panel */}
+      {showOB && symbol.startsWith("BINANCE:") && (
+        <div style={{
+          borderRadius: indicator !== "none" ? "0" : "0 0 12px 12px",
+          overflow: "hidden",
+          background: "rgba(255,255,255,0.02)",
+          height: 100,
+          borderTop: "1px solid rgba(255,255,255,0.04)",
+        }}>
+          <canvas
+            ref={depthCanvasRef}
             draggable={false}
             onDragStart={e => e.preventDefault()}
             style={{ display: "block", width: "100%", height: "100%" }}
