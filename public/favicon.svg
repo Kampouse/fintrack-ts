@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0a0a0a"/>
+  <!-- candlestick 1 (red) -->
+  <rect x="96" y="200" width="40" height="140" rx="4" fill="#f87171"/>
+  <rect x="110" y="170" width="12" height="230" fill="#f87171"/>
+  <!-- candlestick 2 (green) -->
+  <rect x="188" y="140" width="40" height="120" rx="4" fill="#a3e635"/>
+  <rect x="202" y="100" width="12" height="230" fill="#a3e635"/>
+  <!-- candlestick 3 (green, taller) -->
+  <rect x="280" y="100" width="40" height="160" rx="4" fill="#a3e635"/>
+  <rect x="294" y="60" width="12" height="270" fill="#a3e635"/>
+  <!-- candlestick 4 (green) -->
+  <rect x="372" y="160" width="40" height="100" rx="4" fill="#a3e635"/>
+  <rect x="386" y="120" width="12" height="220" fill="#a3e635"/>
+</svg>
