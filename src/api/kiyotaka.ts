@@ -38,7 +38,7 @@ export async function fetchOrderbook(
 ): Promise<OrderbookSnapshot> {
   if (!symbol.startsWith("BINANCE:")) return { bids: [], asks: [], timestamp: 0 };
   const res = await fetch(
-    `/api/kiyotaka/orderbook?symbol=${encodeURIComponent(symbol)}&maxDepth=${maxDepth}`,
+    `/api/kiyotaka/orderbook?symbol=${encodeURIComponent(symbol)}&maxDepth=${maxDepth}&_t=${Date.now()}`,
   );
   if (!res.ok) return { bids: [], asks: [], timestamp: 0 };
   return res.json();

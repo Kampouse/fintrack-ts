@@ -114,7 +114,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return new Response(JSON.stringify(result), {
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "public, s-maxage=15",
+        "Cache-Control": "no-store",
       },
     });
   } catch {
