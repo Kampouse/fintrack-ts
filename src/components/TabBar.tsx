@@ -100,11 +100,11 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
             style={{
               width: 56, height: 56,
               display: "flex", alignItems: "center", justifyContent: "center",
-              background: "var(--lime)", border: "none", cursor: "pointer",
+              background: "#141414", border: "1.5px solid var(--lime)", cursor: "pointer",
               borderRadius: "50%",
-              color: "#0a0a0a",
+              color: "var(--lime)",
               marginBottom: 20,
-              boxShadow: "0 4px 16px rgba(190,242,100,0.35), 0 0 0 4px rgba(10,10,10,0.95)",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
             }}
           >
             <Plus size={26} strokeWidth={2.5} />
