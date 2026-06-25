@@ -1435,7 +1435,7 @@ export function CandleChart({
 
   // Orderbook depth fetch (crypto only)
   useEffect(() => {
-    if (!showOB || !symbol.startsWith("BINANCE:") || !barsRef.current.length) {
+    if (!showOB || !symbol.startsWith("BINANCE:")) {
       obDataRef.current = null;
       setObData(null);
       return;
@@ -1446,13 +1446,12 @@ export function CandleChart({
         if (cancelled) return;
         obDataRef.current = data;
         setObData(data);
-        if (barsRef.current.length) render(barsRef.current, days <= 1);
       });
     };
     loadOB();
     const interval = setInterval(loadOB, 15_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [showOB, symbol, days, canChart, render]);
+  }, [showOB, symbol]);
 
   // Chart resize via drag handle
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
