@@ -234,7 +234,7 @@ export default function App() {
   }
 
   return (
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px var(--app-hpad, 16px) 40px" }} className="app-content">
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px var(--app-hpad, 16px) calc(40px + env(safe-area-inset-bottom, 0px))" }} className="app-content">
 
 
       {/* Header */}
@@ -376,7 +376,12 @@ export default function App() {
       {chartPreview && (
         <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
       )}
-      <TabBar active={activeTab} onChange={handleTabChange} />
+      <TabBar
+        active={activeTab}
+        onChange={handleTabChange}
+        onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
+        onWatch={() => setShowWatch(true)}
+      />
     </div>
   );
 }
