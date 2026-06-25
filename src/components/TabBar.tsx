@@ -90,10 +90,10 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
           aria-label="Add position"
           style={{
             flex: 0,
-            width: 52, height: 40,
+            width: 48, height: 48,
             display: "flex", alignItems: "center", justifyContent: "center",
             background: "var(--lime)", border: "none", cursor: "pointer",
-            borderRadius: 14,
+            borderRadius: "50%",
             color: "#0a0a0a",
             marginTop: "auto",
             marginBottom: "auto",
