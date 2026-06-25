@@ -745,11 +745,6 @@ function drawChart(
     }
   }
 
-  // Orderbook depth heatmap (ON TOP of candles, right side overlay)
-  if (obData) {
-    drawOrderbookHeatmap(ctx, s, obData);
-  }
-
   // Current price line
   const lastBar = visibleBars[visibleBars.length - 1];
   const lastY = priceToY(lastBar.close);
@@ -1154,6 +1149,7 @@ export function CandleChart({
   const vpDataRef = useRef<VPRow[]>([]);
   const [showOB, setShowOB] = useState(false);
   const obDataRef = useRef<OrderbookSnapshot | null>(null);
+  const [obData, setObData] = useState<OrderbookSnapshot | null>(null);
   const depthCanvasRef = useRef<HTMLCanvasElement>(null);
   const nextIdRef = useRef(1);
   const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
@@ -1343,16 +1339,7 @@ export function CandleChart({
     // Draw depth chart panel
     if (showOB) {
       const depthCanvas = depthCanvasRef.current;
-      if (depthCanvas) {
-        const dRect = depthCanvas.getBoundingClientRect();
-        depthCanvas.width = dRect.width * dpr;
-        depthCanvas.height = dRect.height * dpr;
-        const dCtx = depthCanvas.getContext("2d");
-        if (dCtx) {
-          dCtx.scale(dpr, dpr);
-          drawDepthChart(dCtx, dRect.width, dRect.height, obDataRef.current);
-        }
-      }
+      // depthCanvas no longer used — OB panel is DOM-based now
     }
   }, [priceLevels, activeTrendlines, selectedTlId, indicator, showOB]);
 
@@ -1450,6 +1437,7 @@ export function CandleChart({
   useEffect(() => {
     if (!showOB || !symbol.startsWith("BINANCE:") || !barsRef.current.length) {
       obDataRef.current = null;
+      setObData(null);
       return;
     }
     let cancelled = false;
@@ -1457,6 +1445,7 @@ export function CandleChart({
       fetchOrderbook(symbol, 500).then((data) => {
         if (cancelled) return;
         obDataRef.current = data;
+        setObData(data);
         if (barsRef.current.length) render(barsRef.current, days <= 1);
       });
     };
@@ -2010,23 +1999,6 @@ export function CandleChart({
           />
         </div>
       )}
-      {/* Orderbook depth chart panel */}
-      {showOB && symbol.startsWith("BINANCE:") && (
-        <div style={{
-          borderRadius: indicator !== "none" ? "0" : "0 0 12px 12px",
-          overflow: "hidden",
-          background: "rgba(255,255,255,0.02)",
-          height: 100,
-          borderTop: "1px solid rgba(255,255,255,0.04)",
-        }}>
-          <canvas
-            ref={depthCanvasRef}
-            draggable={false}
-            onDragStart={e => e.preventDefault()}
-            style={{ display: "block", width: "100%", height: "100%" }}
-          />
-        </div>
-      )}
       {resizable && (
         <div
           onPointerDown={handleResizeStart}
@@ -2046,6 +2018,86 @@ export function CandleChart({
           <div style={{ width: 32, height: 3, borderRadius: 2, background: "var(--text-dim)", opacity: 0.3 }} />
         </div>
       )}
+      {/* Orderbook ladder — separate vertical panel below chart */}
+      {showOB && symbol.startsWith("BINANCE:") && obData && (() => {
+        const asks = [...obData.asks].sort((a, b) => a.price - b.price).slice(0, 10).reverse();
+        const bids = [...obData.bids].sort((a, b) => b.price - a.price).slice(0, 10);
+        const allLevels = [...obData.bids, ...obData.asks];
+        const maxVol = Math.max(...allLevels.map(l => l.volume), 1);
+        const cumBid = obData.bids.reduce((s, l) => s + l.volume, 0);
+        const cumAsk = obData.asks.reduce((s, l) => s + l.volume, 0);
+        const bidShare = (cumBid / (cumBid + cumAsk) * 100).toFixed(0);
+        const mid = obData.bids[0] && obData.asks[0] ? (obData.bids[0].price + obData.asks[0].price) / 2 : 0;
+        const spread = obData.bids[0] && obData.asks[0] ? obData.asks[0].price - obData.bids[0].price : 0;
+        const fmtP = (p: number) => p >= 1000 ? p.toFixed(0) : p >= 1 ? p.toFixed(2) : p.toFixed(4);
+        return (
+          <div style={{
+            marginTop: "8px",
+            borderRadius: "12px",
+            overflow: "hidden",
+            background: "rgba(255,255,255,0.02)",
+            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+          }}>
+            {/* Header */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 12px",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Order Book</span>
+              <div style={{ display: "flex", gap: "12px" }}>
+                <span style={{ fontSize: "9px", color: "rgba(248,113,113,0.6)" }}>Asks {fmtVol(cumAsk)}</span>
+                <span style={{ fontSize: "9px", color: "rgba(83,255,132,0.6)" }}>Bids {fmtVol(cumBid)}</span>
+                <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)" }}>{bidShare}% bid</span>
+              </div>
+            </div>
+            {/* Column labels */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "3px 12px", fontSize: "9px", color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <span>Price</span>
+              <span style={{ textAlign: "right" }}>Size</span>
+              <span style={{ textAlign: "right" }}>Total</span>
+            </div>
+            {/* Asks (top, descending) */}
+            <div>
+              {asks.map((l, i) => {
+                const cum = asks.slice(i).reduce((s, x) => s + x.volume, 0);
+                return (
+                  <div key={`a${i}`} style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "2px 12px", fontSize: "11px" }}>
+                    <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, background: "rgba(248,113,113,0.08)", width: `${(cum / (cumBid + cumAsk)) * 100}%` }} />
+                    <span style={{ position: "relative", color: "rgba(248,113,113,0.9)" }}>{fmtP(l.price)}</span>
+                    <span style={{ position: "relative", textAlign: "right", color: "rgba(255,255,255,0.5)" }}>{l.volume.toFixed(l.volume >= 100 ? 0 : l.volume >= 1 ? 2 : 4)}</span>
+                    <span style={{ position: "relative", textAlign: "right", color: "rgba(255,255,255,0.3)" }}>{fmtVol(cum)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Mid price / spread */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 12px",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--lime)" }}>{fmtP(mid)}</span>
+              <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)" }}>spread {fmtP(spread)}</span>
+            </div>
+            {/* Bids (bottom, descending) */}
+            <div>
+              {bids.map((l, i) => {
+                const cum = bids.slice(0, i + 1).reduce((s, x) => s + x.volume, 0);
+                return (
+                  <div key={`b${i}`} style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "2px 12px", fontSize: "11px" }}>
+                    <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, background: "rgba(83,255,132,0.08)", width: `${(cum / (cumBid + cumAsk)) * 100}%` }} />
+                    <span style={{ position: "relative", color: "rgba(83,255,132,0.9)" }}>{fmtP(l.price)}</span>
+                    <span style={{ position: "relative", textAlign: "right", color: "rgba(255,255,255,0.5)" }}>{l.volume.toFixed(l.volume >= 100 ? 0 : l.volume >= 1 ? 2 : 4)}</span>
+                    <span style={{ position: "relative", textAlign: "right", color: "rgba(255,255,255,0.3)" }}>{fmtVol(cum)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
