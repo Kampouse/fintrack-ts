@@ -43,3 +43,29 @@ export async function fetchOrderbook(
   if (!res.ok) return { bids: [], asks: [], timestamp: 0 };
   return res.json();
 }
+
+export interface Trade {
+  price: number;
+  qty: number;
+  time: number;
+  isBuyerMaker: boolean;
+}
+
+export async function fetchTrades(
+  symbol: string,
+  limit = 50,
+): Promise<Trade[]> {
+  if (!symbol.startsWith("BINANCE:")) return [];
+  const sym = symbol.replace("BINANCE:", "");
+  const res = await fetch(
+    `https://api.binance.com/api/v3/aggTrades?symbol=${sym}&limit=${limit}`,
+  );
+  if (!res.ok) return [];
+  const raw = await res.json();
+  return (raw as any[]).map((t) => ({
+    price: Number(t.p),
+    qty: Number(t.q),
+    time: Number(t.T),
+    isBuyerMaker: t.m,
+  }));
+}

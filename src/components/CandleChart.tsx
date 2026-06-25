@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
-import { fetchVolumeProfile, type VPRow } from "@/api/kiyotaka";
+import { fetchVolumeProfile, type VPRow, type Trade, fetchTrades } from "@/api/kiyotaka";
 
 export interface PriceLevel {
   price: number;
@@ -1147,6 +1147,8 @@ export function CandleChart({
   const [indicator, setIndicator] = useState<"none" | "macd" | "rsi" | "zscore">("none");
   const [showVP, setShowVP] = useState(false);
   const vpDataRef = useRef<VPRow[]>([]);
+  const [showTape, setShowTape] = useState(false);
+  const [trades, setTrades] = useState<Trade[]>([]);
   const nextIdRef = useRef(1);
   const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
   const priceZoomAnchorRef = useRef<{ y: number; lo: number; hi: number } | null>(null);
@@ -1423,6 +1425,24 @@ export function CandleChart({
     const interval = setInterval(loadVP, 60_000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [showVP, symbol, days, canChart, render]);
+
+  // Tape fetch (crypto only) — poll every 2s
+  useEffect(() => {
+    if (!showTape || !symbol.startsWith("BINANCE:")) {
+      setTrades([]);
+      return;
+    }
+    let cancelled = false;
+    const loadTape = () => {
+      fetchTrades(symbol, 50).then((data) => {
+        if (cancelled) return;
+        setTrades(data.reverse()); // newest first
+      });
+    };
+    loadTape();
+    const interval = setInterval(loadTape, 2_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [showTape, symbol]);
 
   // Chart resize via drag handle
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -1884,6 +1904,24 @@ export function CandleChart({
               VP
             </button>
           )}
+          {symbol.startsWith("BINANCE:") && (
+            <button
+              onClick={() => setShowTape(v => !v)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "none",
+                background: showTape ? "rgba(56,189,248,0.12)" : "transparent",
+                color: showTape ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "ui-monospace, SFMono-Regular, monospace",
+              }}
+            >
+              TAPE
+            </button>
+          )}
         </div>
       </div>
       <div
@@ -1970,6 +2008,58 @@ export function CandleChart({
           <div style={{ width: 32, height: 3, borderRadius: 2, background: "var(--text-dim)", opacity: 0.3 }} />
         </div>
       )}
+      {/* Tape — trade feed below chart */}
+      {showTape && symbol.startsWith("BINANCE:") && trades.length > 0 && (() => {
+        const fmtP = (p: number) => p >= 1000 ? p.toFixed(0) : p >= 1 ? p.toFixed(2) : p.toFixed(4);
+        const fmtT = (t: number) => {
+          const d = new Date(t);
+          return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+        };
+        const buys = trades.filter(t => !t.isBuyerMaker).length;
+        const sells = trades.length - buys;
+        return (
+          <div style={{
+            marginTop: "8px",
+            borderRadius: "12px",
+            overflow: "hidden",
+            background: "rgba(255,255,255,0.02)",
+            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+          }}>
+            {/* Header */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "6px 12px",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Tape</span>
+              <div style={{ display: "flex", gap: "12px" }}>
+                <span style={{ fontSize: "9px", color: "rgba(83,255,132,0.6)" }}>{buys} buys</span>
+                <span style={{ fontSize: "9px", color: "rgba(248,113,113,0.6)" }}>{sells} sells</span>
+              </div>
+            </div>
+            {/* Column labels */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "3px 12px", fontSize: "9px", color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <span>Time</span>
+              <span style={{ textAlign: "right" }}>Price</span>
+              <span style={{ textAlign: "right" }}>Size</span>
+            </div>
+            {/* Trade rows */}
+            <div style={{ maxHeight: "300px", overflowY: "auto" }}>
+              {trades.map((t, i) => (
+                <div key={i} style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+                  padding: "2px 12px", fontSize: "11px",
+                  borderBottom: "1px solid rgba(255,255,255,0.02)",
+                }}>
+                  <span style={{ color: "rgba(255,255,255,0.3)" }}>{fmtT(t.time)}</span>
+                  <span style={{ textAlign: "right", color: t.isBuyerMaker ? "rgba(248,113,113,0.9)" : "rgba(83,255,132,0.9)" }}>{fmtP(t.price)}</span>
+                  <span style={{ textAlign: "right", color: "rgba(255,255,255,0.5)" }}>{t.qty.toFixed(t.qty >= 100 ? 0 : t.qty >= 1 ? 2 : 4)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
