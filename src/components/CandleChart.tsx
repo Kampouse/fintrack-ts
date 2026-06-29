@@ -1130,58 +1130,72 @@ function drawIndicator(
 function drawMeasureOverlay(
   ctx: CanvasRenderingContext2D,
   s: DrawState,
-  y1: number,
-  y2: number,
+  bars: Bar[],
+  x1: number,
+  x2: number,
 ) {
-  const { padLeft, chartW, yToPrice } = s;
+  const { padLeft, padTop, chartW, chartH, xToIdx, idxToX, priceToY } = s;
 
-  const p1 = yToPrice(y1);
-  const p2 = yToPrice(y2);
-  if (!isFinite(p1) || !isFinite(p2) || p1 === 0) return;
+  // Map finger X → bar index (clamped to valid range)
+  let i1 = Math.round(xToIdx(x1));
+  let i2 = Math.round(xToIdx(x2));
+  i1 = Math.max(0, Math.min(bars.length - 1, i1));
+  i2 = Math.max(0, Math.min(bars.length - 1, i2));
+  if (i1 === i2) return;
 
+  const a = i1 < i2 ? i1 : i2; // earlier candle
+  const b = i1 < i2 ? i2 : i1; // later candle
+  const p1 = bars[a].close;
+  const p2 = bars[b].close;
   const diff = p2 - p1;
   const pct = (diff / p1) * 100;
   const isUp = diff >= 0;
   const color = isUp ? "#22c55e" : "#f87171";
 
-  const topY = Math.min(y1, y2);
-  const botY = Math.max(y1, y2);
-  const midY = (y1 + y2) / 2;
+  const xa = idxToX(a);
+  const xb = idxToX(b);
+  const ya = priceToY(p1);
+  const yb = priceToY(p2);
 
-  // Semi-transparent fill between levels
-  ctx.fillStyle = isUp ? "rgba(34,197,94,0.06)" : "rgba(248,113,113,0.06)";
-  ctx.fillRect(padLeft, topY, chartW, botY - topY);
-
-  // Dashed lines at both price levels
+  // Vertical lines at each candle
   ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = 0.45;
   ctx.setLineDash([4, 4]);
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(padLeft, y1);
-  ctx.lineTo(padLeft + chartW, y1);
-  ctx.moveTo(padLeft, y2);
-  ctx.lineTo(padLeft + chartW, y2);
+  ctx.moveTo(xa, padTop);
+  ctx.lineTo(xa, padTop + chartH);
+  ctx.moveTo(xb, padTop);
+  ctx.lineTo(xb, padTop + chartH);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 
-  // Vertical connecting line
+  // Dots at each candle's close price
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(xa, ya, 3.5, 0, Math.PI * 2);
+  ctx.arc(xb, yb, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Connecting line between the two closes
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(padLeft + chartW / 2, y1);
-  ctx.lineTo(padLeft + chartW / 2, y2);
+  ctx.moveTo(xa, ya);
+  ctx.lineTo(xb, yb);
   ctx.stroke();
 
-  // Label box
+  // Label box at midpoint of the connecting line
+  const midX = (xa + xb) / 2;
+  const midY = (ya + yb) / 2;
   const label = `${isUp ? "+" : ""}${pct.toFixed(2)}%`;
   const sub = `${isUp ? "+" : "-"}$${fmtPrice(Math.abs(diff))}`;
   ctx.font = "700 14px ui-monospace, SFMono-Regular, monospace";
   const tw = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width);
   const boxW = tw + 24;
   const boxH = 40;
-  const boxX = padLeft + chartW / 2 - boxW / 2;
+  const boxX = Math.max(padLeft + 2, Math.min(padLeft + chartW - boxW - 2, midX - boxW / 2));
   const boxY = midY - boxH / 2;
 
   ctx.fillStyle = color;
@@ -1201,10 +1215,10 @@ function drawMeasureOverlay(
   ctx.fillStyle = "#0a0a0a";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(label, padLeft + chartW / 2, midY - 8);
+  ctx.fillText(label, boxX + boxW / 2, boxY + 14);
   ctx.font = "500 11px ui-monospace, SFMono-Regular, monospace";
-  ctx.fillStyle = "rgba(10,10,10,0.65)";
-  ctx.fillText(sub, padLeft + chartW / 2, midY + 9);
+  ctx.fillStyle = "rgba(10,10,10,0.7)";
+  ctx.fillText(sub, boxX + boxW / 2, boxY + 29);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }
@@ -1257,7 +1271,7 @@ export function CandleChart({
   const crossXRef = useRef<number | null>(null);
   const pinchRef = useRef({ active: false, dist: 0, startView: [0, 0] as [number, number] });
   const panRef = useRef({ active: false, startX: 0, startView: [0, 0] as [number, number] });
-  const measureRef = useRef<{ y1: number; y2: number } | null>(null);
+  const measureRef = useRef<{ x1: number; x2: number } | null>(null);
 
   // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
   const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
@@ -1408,7 +1422,7 @@ export function CandleChart({
     // Two-finger measurement overlay
     if (measureRef.current) {
       const ms = buildDrawState(ctx, w, h, bars, subDaily, vs, ve, priceZoomRef.current);
-      drawMeasureOverlay(ctx, ms, measureRef.current.y1, measureRef.current.y2);
+      drawMeasureOverlay(ctx, ms, bars, measureRef.current.x1, measureRef.current.x2);
     }
 
     // Draw indicator panel
@@ -1697,13 +1711,13 @@ export function CandleChart({
         dist: Math.sqrt(dx * dx + dy * dy),
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
-      // Measurement overlay: record both finger Y positions relative to canvas
+      // Measurement overlay: record both finger X positions relative to canvas
       const canvas = canvasRef.current;
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
         measureRef.current = {
-          y1: e.touches[0].clientY - rect.top,
-          y2: e.touches[1].clientY - rect.top,
+          x1: e.touches[0].clientX - rect.left,
+          x2: e.touches[1].clientX - rect.left,
         };
         if (barsRef.current.length) render(barsRef.current, days <= 1, null);
       }
@@ -1820,8 +1834,8 @@ export function CandleChart({
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
         measureRef.current = {
-          y1: e.touches[0].clientY - rect.top,
-          y2: e.touches[1].clientY - rect.top,
+          x1: e.touches[0].clientX - rect.left,
+          x2: e.touches[1].clientX - rect.left,
         };
       }
       render(bars, days <= 1, null);
