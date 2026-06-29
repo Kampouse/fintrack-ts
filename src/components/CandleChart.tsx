@@ -1476,22 +1476,22 @@ export function CandleChart({
       const x2 = s.idxToX(timeToIdx(tl.endTime));
       const y2 = s.priceToY(tl.endPrice);
 
-      // Endpoints: 12px radius
+      // Endpoints: 26px radius (fat finger friendly)
       for (const [mode, ex, ey] of [["start", x1, y1], ["end", x2, y2]] as const) {
         const d = Math.sqrt((px - ex) ** 2 + (py - ey) ** 2);
-        if (d < 12 && (!best || d < best.dist)) {
+        if (d < 26 && (!best || d < best.dist)) {
           best = { tl, mode, dist: d };
         }
       }
 
-      // Line body: point-to-line distance, 8px threshold
+      // Line body: point-to-line distance, 18px threshold
       const lenSq = (x2 - x1) ** 2 + (y2 - y1) ** 2;
       if (lenSq > 0) {
         const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / lenSq));
         const projX = x1 + t * (x2 - x1);
         const projY = y1 + t * (y2 - y1);
         const d = Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-        if (d < 8 && (!best || d < best.dist)) {
+        if (d < 18 && (!best || d < best.dist)) {
           best = { tl, mode: "move", dist: d };
         }
       }
@@ -1519,8 +1519,8 @@ export function CandleChart({
       return (st.lo + st.hi) / 2;
     })();
 
-    const st_lo = midPrice * 0.92;
-    const st_hi = midPrice * 1.08;
+    const st_lo = midPrice * 0.96;
+    const st_hi = midPrice * 1.04;
 
     const newTl: TrendLine = {
       id: nextIdRef.current++,
