@@ -1272,6 +1272,8 @@ export function CandleChart({
   const pinchRef = useRef({ active: false, dist: 0, startView: [0, 0] as [number, number] });
   const panRef = useRef({ active: false, startX: 0, startView: [0, 0] as [number, number] });
   const measureRef = useRef<{ x1: number; x2: number } | null>(null);
+  const longPressRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> | null }>({ x: 0, y: 0, timer: null });
+  const measureActiveRef = useRef(false);
 
   // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
   const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
@@ -1703,6 +1705,12 @@ export function CandleChart({
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Second finger → cancel any pending long-press (it's a pinch)
+    if (longPressRef.current.timer) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current.timer = null;
+    }
+
     if (e.touches.length === 2) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -1711,16 +1719,6 @@ export function CandleChart({
         dist: Math.sqrt(dx * dx + dy * dy),
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
-      // Measurement overlay: record both finger X positions relative to canvas
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        measureRef.current = {
-          x1: e.touches[0].clientX - rect.left,
-          x2: e.touches[1].clientX - rect.left,
-        };
-        if (barsRef.current.length) render(barsRef.current, days <= 1, null);
-      }
     } else if (e.touches.length === 1 && !pinchRef.current.active) {
       const canvas = canvasRef.current;
       if (canvas) {
@@ -1755,11 +1753,26 @@ export function CandleChart({
           return; // Don't start pan
         }
       }
+
       panRef.current = {
         active: true,
         startX: e.touches[0].clientX,
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
+
+      // Long-press → enter measure mode (both points start at finger position)
+      const cx = e.touches[0].clientX;
+      const cy = e.touches[0].clientY;
+      longPressRef.current = { x: cx, y: cy, timer: setTimeout(() => {
+        if (panRef.current.active && canvasRef.current) {
+          const r = canvasRef.current.getBoundingClientRect();
+          const fx = cx - r.left;
+          measureRef.current = { x1: fx, x2: fx };
+          measureActiveRef.current = true;
+          panRef.current.active = false; // steal from pan
+          if (barsRef.current.length) renderRef.current(barsRef.current, days <= 1, null);
+        }
+      }, 300) };
     }
   }, [hitTestTrendline, pixelToData, days]);
 
@@ -1818,6 +1831,15 @@ export function CandleChart({
       return;
     }
 
+    if (measureActiveRef.current && e.touches.length === 1) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      measureRef.current = { x1: measureRef.current!.x1, x2: e.touches[0].clientX - rect.left };
+      render(bars, days <= 1, null);
+      return;
+    }
+
     if (pinchRef.current.active && e.touches.length === 2) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -1829,17 +1851,16 @@ export function CandleChart({
       const newRange = Math.max(5, Math.min(bars.length, Math.round(range * scale)));
       const newStart = Math.max(0, Math.min(bars.length - newRange, Math.round(center - newRange / 2)));
       viewRef.current = { start: newStart, end: newStart + newRange };
-      // Update measurement finger positions
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        measureRef.current = {
-          x1: e.touches[0].clientX - rect.left,
-          x2: e.touches[1].clientX - rect.left,
-        };
-      }
       render(bars, days <= 1, null);
     } else if (panRef.current.active && e.touches.length === 1) {
+      // Cancel long-press if this turned into a real pan (>10px moved)
+      if (longPressRef.current.timer) {
+        const moved = Math.abs(e.touches[0].clientX - longPressRef.current.x) + Math.abs(e.touches[0].clientY - longPressRef.current.y);
+        if (moved > 10) {
+          clearTimeout(longPressRef.current.timer);
+          longPressRef.current.timer = null;
+        }
+      }
       const dx = e.touches[0].clientX - panRef.current.startX;
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -1855,11 +1876,16 @@ export function CandleChart({
   }, [days, render, pixelToData, updateTl]);
 
   const handleTouchEnd = useCallback(() => {
+    if (longPressRef.current.timer) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current.timer = null;
+    }
     pinchRef.current = { active: false, dist: 0, startView: [0, 0] };
     panRef.current = { active: false, startX: 0, startView: [0, 0] };
     dragRef.current = null;
     priceZoomAnchorRef.current = null;
-    if (measureRef.current) {
+    if (measureActiveRef.current) {
+      measureActiveRef.current = false;
       measureRef.current = null;
       if (barsRef.current.length) renderRef.current(barsRef.current, false);
     }
