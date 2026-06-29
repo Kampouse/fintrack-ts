@@ -1127,6 +1127,88 @@ function drawIndicator(
   }
 }
 
+function drawMeasureOverlay(
+  ctx: CanvasRenderingContext2D,
+  s: DrawState,
+  y1: number,
+  y2: number,
+) {
+  const { padLeft, chartW, yToPrice } = s;
+
+  const p1 = yToPrice(y1);
+  const p2 = yToPrice(y2);
+  if (!isFinite(p1) || !isFinite(p2) || p1 === 0) return;
+
+  const diff = p2 - p1;
+  const pct = (diff / p1) * 100;
+  const isUp = diff >= 0;
+  const color = isUp ? "#22c55e" : "#f87171";
+
+  const topY = Math.min(y1, y2);
+  const botY = Math.max(y1, y2);
+  const midY = (y1 + y2) / 2;
+
+  // Semi-transparent fill between levels
+  ctx.fillStyle = isUp ? "rgba(34,197,94,0.06)" : "rgba(248,113,113,0.06)";
+  ctx.fillRect(padLeft, topY, chartW, botY - topY);
+
+  // Dashed lines at both price levels
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.5;
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, y1);
+  ctx.lineTo(padLeft + chartW, y1);
+  ctx.moveTo(padLeft, y2);
+  ctx.lineTo(padLeft + chartW, y2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Vertical connecting line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(padLeft + chartW / 2, y1);
+  ctx.lineTo(padLeft + chartW / 2, y2);
+  ctx.stroke();
+
+  // Label box
+  const label = `${isUp ? "+" : ""}${pct.toFixed(2)}%`;
+  const sub = `${isUp ? "+" : "-"}$${fmtPrice(Math.abs(diff))}`;
+  ctx.font = "700 14px ui-monospace, SFMono-Regular, monospace";
+  const tw = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width);
+  const boxW = tw + 24;
+  const boxH = 40;
+  const boxX = padLeft + chartW / 2 - boxW / 2;
+  const boxY = midY - boxH / 2;
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  const r = 6;
+  ctx.moveTo(boxX + r, boxY);
+  ctx.lineTo(boxX + boxW - r, boxY);
+  ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
+  ctx.lineTo(boxX + boxW, boxY + boxH - r);
+  ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
+  ctx.lineTo(boxX + r, boxY + boxH);
+  ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
+  ctx.lineTo(boxX, boxY + r);
+  ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
+  ctx.fill();
+
+  ctx.fillStyle = "#0a0a0a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, padLeft + chartW / 2, midY - 8);
+  ctx.font = "500 11px ui-monospace, SFMono-Regular, monospace";
+  ctx.fillStyle = "rgba(10,10,10,0.65)";
+  ctx.fillText(sub, padLeft + chartW / 2, midY + 9);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
 export function CandleChart({
   symbol,
   height = 220,
@@ -1175,6 +1257,7 @@ export function CandleChart({
   const crossXRef = useRef<number | null>(null);
   const pinchRef = useRef({ active: false, dist: 0, startView: [0, 0] as [number, number] });
   const panRef = useRef({ active: false, startX: 0, startView: [0, 0] as [number, number] });
+  const measureRef = useRef<{ y1: number; y2: number } | null>(null);
 
   // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
   const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
@@ -1321,6 +1404,12 @@ export function CandleChart({
 
     const tls = dragTrendlinesRef.current ?? activeTrendlines;
     drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current);
+
+    // Two-finger measurement overlay
+    if (measureRef.current) {
+      const ms = buildDrawState(ctx, w, h, bars, subDaily, vs, ve, priceZoomRef.current);
+      drawMeasureOverlay(ctx, ms, measureRef.current.y1, measureRef.current.y2);
+    }
 
     // Draw indicator panel
     if (indicator !== "none") {
@@ -1608,6 +1697,16 @@ export function CandleChart({
         dist: Math.sqrt(dx * dx + dy * dy),
         startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
       };
+      // Measurement overlay: record both finger Y positions relative to canvas
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        measureRef.current = {
+          y1: e.touches[0].clientY - rect.top,
+          y2: e.touches[1].clientY - rect.top,
+        };
+        if (barsRef.current.length) render(barsRef.current, days <= 1, null);
+      }
     } else if (e.touches.length === 1 && !pinchRef.current.active) {
       const canvas = canvasRef.current;
       if (canvas) {
@@ -1716,6 +1815,15 @@ export function CandleChart({
       const newRange = Math.max(5, Math.min(bars.length, Math.round(range * scale)));
       const newStart = Math.max(0, Math.min(bars.length - newRange, Math.round(center - newRange / 2)));
       viewRef.current = { start: newStart, end: newStart + newRange };
+      // Update measurement finger positions
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        measureRef.current = {
+          y1: e.touches[0].clientY - rect.top,
+          y2: e.touches[1].clientY - rect.top,
+        };
+      }
       render(bars, days <= 1, null);
     } else if (panRef.current.active && e.touches.length === 1) {
       const dx = e.touches[0].clientX - panRef.current.startX;
@@ -1737,6 +1845,10 @@ export function CandleChart({
     panRef.current = { active: false, startX: 0, startView: [0, 0] };
     dragRef.current = null;
     priceZoomAnchorRef.current = null;
+    if (measureRef.current) {
+      measureRef.current = null;
+      if (barsRef.current.length) renderRef.current(barsRef.current, false);
+    }
   }, []);
 
   // Mouse wheel zoom
