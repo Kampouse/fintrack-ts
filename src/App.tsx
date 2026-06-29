@@ -213,7 +213,7 @@ export default function App() {
           quote={quotes[detailSymbol]}
           onBack={closeDetail}
           onRemoveLot={removeLot}
-          onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts })}
+          onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}
           onAddLot={() => {
             setPreselectSymbol(detailSymbol);
             setDetailSymbol(null);
@@ -225,7 +225,7 @@ export default function App() {
         {showAdd && (
           <AddSheet
             onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-            onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); }}
+            onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
             preselect={preselectSymbol}
           />
         )}
@@ -354,7 +354,7 @@ export default function App() {
       {showAdd && (
         <AddSheet
           onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-          onSave={(sym, qty, price) => { addLot(sym, qty, price); setShowAdd(false); setPreselectSymbol(null); }}
+          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
           preselect={preselectSymbol}
         />
       )}

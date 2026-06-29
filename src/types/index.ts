@@ -4,6 +4,7 @@ export interface Transaction {
   qty: number;
   price: number;
   ts: number;
+  note?: string;
 }
 
 export interface Quote {

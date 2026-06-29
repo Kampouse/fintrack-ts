@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
 import { fetchVolumeProfile, type VPRow, type Trade, fetchTrades } from "@/api/kiyotaka";
 
+interface OrderbookLevel { price: number; volume: number; }
+interface OrderbookSnapshot { bids: OrderbookLevel[]; asks: OrderbookLevel[]; }
+
 export interface PriceLevel {
   price: number;
   label: string;

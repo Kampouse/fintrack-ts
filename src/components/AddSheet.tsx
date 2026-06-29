@@ -9,7 +9,7 @@ import { fmtUsd } from "@/lib/format";
 
 interface Props {
   onClose: () => void;
-  onSave: (symbol: string, qty: number, price: number) => void;
+  onSave: (symbol: string, qty: number, price: number, note?: string) => void;
   preselect?: string | null;
 }
 
@@ -24,6 +24,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
   const [symbol, setSymbol] = useState(preselect || "");
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
+  const [note, setNote] = useState("");
   const [liveQuote, setLiveQuote] = useState<Quote | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const priceRef = useRef(false);
@@ -236,9 +237,18 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
             style={input}
           />
         </div>
+        <div style={{ marginBottom: "12px" }}>
+          <textarea
+            placeholder="Why this trade? (optional)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            style={{ ...input, resize: "none", minHeight: 60 }}
+          />
+        </div>
 
         <button
-          onClick={() => valid && onSave(symbol, parseFloat(qty), parseFloat(price))}
+          onClick={() => valid && onSave(symbol, parseFloat(qty), parseFloat(price), note.trim() || undefined)}
           disabled={!valid}
           style={{
             width: "100%",

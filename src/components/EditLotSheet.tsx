@@ -14,6 +14,7 @@ export function EditLotSheet({ lot, onClose, onSave }: Props) {
   const [qty, setQty] = useState(String(lot.qty));
   const [price, setPrice] = useState(String(lot.price));
   const [ts, setTs] = useState(toLocalInput(lot.ts));
+  const [note, setNote] = useState(lot.note || "");
 
   const valid = parseFloat(qty) > 0 && parseFloat(price) > 0 && ts;
 
@@ -59,9 +60,18 @@ export function EditLotSheet({ lot, onClose, onSave }: Props) {
           <label style={{ fontSize: "13px", color: "var(--text-dim)", marginBottom: "6px", display: "block" }}>Date</label>
           <input type="datetime-local" value={ts} onChange={(e) => setTs(e.target.value)} style={input} />
         </div>
+        <div style={{ marginBottom: "20px" }}>
+          <label style={{ fontSize: "13px", color: "var(--text-dim)", marginBottom: "6px", display: "block" }}>Note (optional)</label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            style={{ ...input, resize: "none", minHeight: 60 }}
+          />
+        </div>
 
         <button
-          onClick={() => valid && onSave({ qty: parseFloat(qty), price: parseFloat(price), ts: fromLocalInput(ts) })}
+          onClick={() => valid && onSave({ qty: parseFloat(qty), price: parseFloat(price), ts: fromLocalInput(ts), ...(note.trim() ? { note: note.trim() } : {}) })}
           disabled={!valid}
           style={{
             width: "100%",

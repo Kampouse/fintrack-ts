@@ -19,10 +19,10 @@ export function useTransactions() {
     localStorage.setItem(TX_KEY, JSON.stringify(txs));
   }, [txs]);
 
-  const addLot = useCallback((symbol: string, qty: number, price: number, ts?: number) => {
+  const addLot = useCallback((symbol: string, qty: number, price: number, note?: string, ts?: number) => {
     setTxs((prev) => [
       ...prev,
-      { id: uid(), symbol, qty, price, ts: ts ?? Date.now() },
+      { id: uid(), symbol, qty, price, ts: ts ?? Date.now(), ...(note?.trim() ? { note: note.trim() } : {}) },
     ]);
   }, []);
 

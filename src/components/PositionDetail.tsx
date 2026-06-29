@@ -161,6 +161,11 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
                   Avg cost after this lot: {fmtUsd(runAvg)}
                 </div>
               )}
+              {lot.note && (
+                <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "6px", marginLeft: "20px", fontStyle: "italic", lineHeight: 1.4 }}>
+                  {lot.note}
+                </div>
+              )}
             </div>
           );
         })}
