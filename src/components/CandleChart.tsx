@@ -642,42 +642,57 @@ function drawFib(
   const x2 = s.idxToX(s.bars.findIndex((b, _i) => parseTime(b.time) === tl.endTime));
   const leftX = Math.min(x1, x2);
   const rightX = Math.max(x1, x2);
-  if (rightX - leftX < 2) return;
+
+  // Fib levels extend across the FULL chart width
+  const fullLeft = padLeft;
+  const fullRight = chartW;
 
   for (const { r, label } of FIB_LEVELS) {
     const price = hi - range * r;
     const y = priceToY(price);
+    if (y < s.padTop - 20 || y > s.padTop + s.chartH + 20) continue;
     const color = FIB_COLORS[label] || "#888";
-    ctx.strokeStyle = color + "88";
+
+    // Full-width level line
+    ctx.strokeStyle = color + "55";
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
+    ctx.setLineDash([4, 3]);
     ctx.beginPath();
-    ctx.moveTo(leftX, y);
-    ctx.lineTo(rightX, y);
+    ctx.moveTo(fullLeft, y);
+    ctx.lineTo(fullRight, y);
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Price label on the RIGHT side (like TradingView)
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     const labelText = `${label}  ${price >= 1000 ? price.toFixed(0) : price.toFixed(2)}`;
-    const lw = ctx.measureText(labelText).width + 6;
-    ctx.fillStyle = color + "22";
-    ctx.fillRect(leftX, y - 7, lw, 13);
+    const lw = ctx.measureText(labelText).width + 8;
+    ctx.fillStyle = color + "20";
+    ctx.fillRect(fullRight - lw - 2, y - 7, lw, 13);
     ctx.fillStyle = color;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(labelText, leftX + 3, y - 0.5);
+    ctx.fillText(labelText, fullRight - lw + 2, y - 0.5);
   }
 
-  if (selected) {
-    for (const [px, py] of [[x1, priceToY(tl.startPrice)], [x2, priceToY(tl.endPrice)]]) {
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = tl.color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+  // Diagonal trend line between the two anchors
+  ctx.strokeStyle = tl.color + "aa";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x1, priceToY(tl.startPrice));
+  ctx.lineTo(x2, priceToY(tl.endPrice));
+  ctx.stroke();
+
+  // Anchor handles (always visible for fib, larger when selected)
+  const handleR = selected ? 6 : 4;
+  for (const [px, py] of [[x1, priceToY(tl.startPrice)], [x2, priceToY(tl.endPrice)]]) {
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(px, py, handleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = tl.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 }
 
@@ -1504,8 +1519,8 @@ export function CandleChart({
       return (st.lo + st.hi) / 2;
     })();
 
-    const st_lo = midPrice * 0.97;
-    const st_hi = midPrice * 1.03;
+    const st_lo = midPrice * 0.92;
+    const st_hi = midPrice * 1.08;
 
     const newTl: TrendLine = {
       id: nextIdRef.current++,
