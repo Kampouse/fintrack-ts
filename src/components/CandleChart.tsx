@@ -18,6 +18,7 @@ export interface TrendLine {
   endTime: number;    // bar timestamp (ms)
   endPrice: number;
   color: string;
+  kind?: "line" | "fib";
 }
 
 interface Props {
@@ -65,6 +66,30 @@ interface Bar {
   volume: number;
 }
 
+function toHeikinAshi(bars: Bar[]): Bar[] {
+  if (!bars.length) return [];
+  const result: Bar[] = [];
+  let prevOpen = (bars[0].open + bars[0].close) / 2;
+  let prevClose = (bars[0].open + bars[0].high + bars[0].low + bars[0].close) / 4;
+  result.push({
+    time: bars[0].time, open: prevOpen, close: prevClose,
+    high: Math.max(bars[0].high, prevOpen, prevClose),
+    low: Math.min(bars[0].low, prevOpen, prevClose),
+    volume: bars[0].volume,
+  });
+  for (let i = 1; i < bars.length; i++) {
+    const b = bars[i];
+    const haClose = (b.open + b.high + b.low + b.close) / 4;
+    const haOpen = (prevOpen + prevClose) / 2;
+    const haHigh = Math.max(b.high, haOpen, haClose);
+    const haLow = Math.min(b.low, haOpen, haClose);
+    result.push({ time: b.time, open: haOpen, high: haHigh, low: haLow, close: haClose, volume: b.volume });
+    prevOpen = haOpen;
+    prevClose = haClose;
+  }
+  return result;
+}
+
 interface DrawState {
   bars: Bar[];
   subDaily: boolean;
@@ -89,6 +114,7 @@ interface DrawState {
   volScale: number;
   idxToX: (idx: number) => number;
   xToIdx: (x: number) => number;
+  logScale: boolean;
 }
 
 async function fetchOHLC(symbol: string, days: number) {
@@ -272,6 +298,7 @@ function buildDrawState(
   viewStart: number,
   viewEnd: number,
   priceOverride?: { lo: number; hi: number } | null,
+  logScale?: boolean,
 ): DrawState {
   const padRight = 56;
   const padBottom = 22;
@@ -287,7 +314,7 @@ function buildDrawState(
       chartW, chartH, volH, lo: 0, hi: 1, totalRange: 1,
       maxVol: 1, priceToY: () => 0, yToPrice: () => 0, barWidth: 0, bodyWidth: 0,
       viewStart, viewEnd, visibleBars: [], volScale: 0,
-      idxToX: () => 0, xToIdx: () => 0,
+      idxToX: () => 0, xToIdx: () => 0, logScale: !!logScale,
     };
   }
 
@@ -311,10 +338,15 @@ function buildDrawState(
     lo -= pricePad;
     hi += pricePad;
   }
+  if (lo <= 0) lo = 0.0001;  // clamp for log
   const totalRange = hi - lo;
 
-  const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
-  const yToPrice = (y: number) => lo + ((padTop + chartH - y) / chartH) * totalRange;
+  const priceToY = logScale
+    ? (p: number) => { const pp = Math.max(lo, p); return padTop + chartH - ((Math.log(pp) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))) * chartH; }
+    : (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
+  const yToPrice = logScale
+    ? (y: number) => Math.exp(Math.log(lo) + ((padTop + chartH - y) / chartH) * (Math.log(hi) - Math.log(lo)))
+    : (y: number) => lo + ((padTop + chartH - y) / chartH) * totalRange;
   const barWidth = chartW / visible.length;
   const bodyWidth = Math.max(1, barWidth * 0.6);
   const volScale = maxVol > 0 ? volH / maxVol : 0;
@@ -328,7 +360,7 @@ function buildDrawState(
     chartW, chartH, volH, lo, hi, totalRange,
     maxVol, priceToY, yToPrice, barWidth, bodyWidth,
     viewStart: vs, viewEnd: ve, visibleBars: visible, volScale,
-    idxToX, xToIdx,
+    idxToX, xToIdx, logScale: !!logScale,
   };
 }
 
@@ -577,6 +609,78 @@ function drawDepthChart(
   ctx.fillText(`${bidShare}% bid`, padLeft + 130, padTop + 1);
 }
 
+const FIB_LEVELS = [
+  { r: 0,    label: "0" },
+  { r: 0.236, label: "0.236" },
+  { r: 0.382, label: "0.382" },
+  { r: 0.5,  label: "0.5" },
+  { r: 0.618, label: "0.618" },
+  { r: 0.786, label: "0.786" },
+  { r: 1,    label: "1" },
+  { r: 1.618, label: "1.618" },
+];
+
+const FIB_COLORS: Record<string, string> = {
+  "0": "#f87171", "0.236": "#fb923c", "0.382": "#fbbf24",
+  "0.5": "#a78bfa", "0.618": "#34d399", "0.786": "#38bdf8",
+  "1": "#f87171", "1.618": "#f472b6",
+};
+
+function drawFib(
+  ctx: CanvasRenderingContext2D,
+  s: DrawState,
+  tl: TrendLine,
+  selected: boolean,
+) {
+  const { padLeft, chartW, priceToY } = s;
+  const hi = Math.max(tl.startPrice, tl.endPrice);
+  const lo = Math.min(tl.startPrice, tl.endPrice);
+  const range = hi - lo;
+  if (range <= 0) return;
+
+  const x1 = s.idxToX(s.bars.findIndex((b, _i) => parseTime(b.time) === tl.startTime));
+  const x2 = s.idxToX(s.bars.findIndex((b, _i) => parseTime(b.time) === tl.endTime));
+  const leftX = Math.min(x1, x2);
+  const rightX = Math.max(x1, x2);
+  if (rightX - leftX < 2) return;
+
+  for (const { r, label } of FIB_LEVELS) {
+    const price = hi - range * r;
+    const y = priceToY(price);
+    const color = FIB_COLORS[label] || "#888";
+    ctx.strokeStyle = color + "88";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(leftX, y);
+    ctx.lineTo(rightX, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    const labelText = `${label}  ${price >= 1000 ? price.toFixed(0) : price.toFixed(2)}`;
+    const lw = ctx.measureText(labelText).width + 6;
+    ctx.fillStyle = color + "22";
+    ctx.fillRect(leftX, y - 7, lw, 13);
+    ctx.fillStyle = color;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(labelText, leftX + 3, y - 0.5);
+  }
+
+  if (selected) {
+    for (const [px, py] of [[x1, priceToY(tl.startPrice)], [x2, priceToY(tl.endPrice)]]) {
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = tl.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+}
+
 function drawChart(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -593,8 +697,9 @@ function drawChart(
   priceOverride?: { lo: number; hi: number } | null,
   vpData?: VPRow[],
   obData?: OrderbookSnapshot | null,
+  logScale?: boolean,
 ) {
-  const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride);
+  const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride, logScale);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
     lo, hi, totalRange, priceToY, yToPrice, barWidth, bodyWidth,
     visibleBars, volScale, viewStart: vs, idxToX, xToIdx } = s;
@@ -629,9 +734,13 @@ function drawChart(
     drawVolumeProfile(ctx, s, vpData);
   }
 
-  // Trendlines (drawn behind candles)
+  // Trendlines / Fib drawings (drawn behind candles)
   const allTrendlines = [...trendlines];
   for (const tl of allTrendlines) {
+    if (tl.kind === "fib") {
+      drawFib(ctx, s, tl, tl.id === selectedTlId);
+      continue;
+    }
     const x1 = idxToX(timeToIdx(tl.startTime));
     const y1 = priceToY(tl.startPrice);
     const x2 = idxToX(timeToIdx(tl.endTime));
@@ -1247,6 +1356,10 @@ export function CandleChart({
   const [showVP, setShowVP] = useState(false);
   const vpDataRef = useRef<VPRow[]>([]);
   const [showTape, setShowTape] = useState(false);
+  const [logScale, setLogScale] = useState(false);
+  const [magnet, setMagnet] = useState(false);
+  const [candleType, setCandleType] = useState<"candle" | "heikin">("candle");
+  const [drawTool, setDrawTool] = useState<"line" | "fib">("line");
   const [trades, setTrades] = useState<Trade[]>([]);
   const nextIdRef = useRef(1);
   const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
@@ -1290,13 +1403,29 @@ export function CandleChart({
     const s = buildDrawState(
       { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
       barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-      priceZoomRef.current
+      priceZoomRef.current, logScale
     );
     const idx = Math.round(s.xToIdx(px));
     const price = s.yToPrice(py);
     const ts = parseTime(barsRef.current[Math.max(0, Math.min(idx, barsRef.current.length - 1))].time) || Date.now();
     return { idx, price, ts };
-  }, [days]);
+  }, [days, logScale]);
+
+  // Magnet snap: round price to nearest OHLC of the bar under cursor
+  const snapToOHLC = useCallback((data: { idx: number; price: number; ts: number }): { idx: number; price: number; ts: number } => {
+    const bars = barsRef.current;
+    if (!bars.length) return data;
+    const idx = Math.max(0, Math.min(bars.length - 1, data.idx));
+    const bar = bars[idx];
+    const candidates = [bar.open, bar.high, bar.low, bar.close];
+    let best = candidates[0];
+    let bestDist = Math.abs(data.price - best);
+    for (const c of candidates) {
+      const d = Math.abs(data.price - c);
+      if (d < bestDist) { bestDist = d; best = c; }
+    }
+    return { idx, price: best, ts: data.ts };
+  }, []);
 
   // Helper: find trendline + hit-test which part
   const hitTestTrendline = useCallback((px: number, py: number): { tl: TrendLine; mode: "start" | "end" | "move" } | null => {
@@ -1308,7 +1437,7 @@ export function CandleChart({
     const s = buildDrawState(
       { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
       barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-      priceZoomRef.current
+      priceZoomRef.current, logScale
     );
 
     const timeToIdx = (ts: number): number => {
@@ -1354,7 +1483,7 @@ export function CandleChart({
     }
 
     return best ? { tl: best.tl, mode: best.mode } : null;
-  }, [activeTrendlines, days]);
+  }, [activeTrendlines, days, logScale]);
 
   // Create a new trendline button handler
   const handleCreateTrendline = useCallback(() => {
@@ -1370,18 +1499,22 @@ export function CandleChart({
       const rect = canvas.getBoundingClientRect();
       const st = buildDrawState(
         { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-        bars, days <= 1, vs, ve, priceZoomRef.current
+        bars, days <= 1, vs, ve, priceZoomRef.current, logScale
       );
       return (st.lo + st.hi) / 2;
     })();
 
+    const st_lo = midPrice * 0.97;
+    const st_hi = midPrice * 1.03;
+
     const newTl: TrendLine = {
       id: nextIdRef.current++,
       startTime: parseTime(bars[Math.max(0, mid - span)].time),
-      startPrice: midPrice,
+      startPrice: drawTool === "fib" ? st_hi : midPrice,
       endTime: parseTime(bars[Math.min(bars.length - 1, mid + span)].time),
-      endPrice: midPrice,
+      endPrice: drawTool === "fib" ? st_lo : midPrice,
       color: TL_COLORS[(onTrendlineAdd ? trendlines.length : internalTrendlines.length) % TL_COLORS.length],
+      kind: drawTool,
     };
     if (onTrendlineAdd) {
       onTrendlineAdd(newTl);
@@ -1389,7 +1522,7 @@ export function CandleChart({
       setInternalTrendlines(prev => [...prev, newTl]);
     }
     setSelectedTlId(newTl.id);
-  }, [days, onTrendlineAdd, trendlines, internalTrendlines]);
+  }, [days, onTrendlineAdd, trendlines, internalTrendlines, drawTool, logScale]);
 
   const render = useCallback((bars: Bar[], subDaily: boolean, crossX?: number | null) => {
     if (!bars.length) {
@@ -1419,11 +1552,12 @@ export function CandleChart({
     const ve = v.end === 0 ? bars.length : v.end;
 
     const tls = dragTrendlinesRef.current ?? activeTrendlines;
-    drawChart(ctx, w, h, bars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current);
+    const drawBars = candleType === "heikin" ? toHeikinAshi(bars) : bars;
+    drawChart(ctx, w, h, drawBars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current, undefined, logScale);
 
     // Two-finger measurement overlay
     if (measureRef.current) {
-      const ms = buildDrawState(ctx, w, h, bars, subDaily, vs, ve, priceZoomRef.current);
+      const ms = buildDrawState(ctx, w, h, bars, subDaily, vs, ve, priceZoomRef.current, logScale);
       drawMeasureOverlay(ctx, ms, bars, measureRef.current.x1, measureRef.current.x2);
     }
 
@@ -1442,7 +1576,7 @@ export function CandleChart({
       }
     }
 
-  }, [priceLevels, activeTrendlines, selectedTlId, indicator]);
+  }, [priceLevels, activeTrendlines, selectedTlId, indicator, candleType, logScale]);
 
   // Keep a ref to latest render so the fetch effect doesn't re-fire on trendline changes
   const renderRef = useRef(render);
@@ -1619,10 +1753,11 @@ export function CandleChart({
     if (dragRef.current && (e as React.PointerEvent).buttons === 1) {
       const data = pixelToData(x, y);
       if (!data) return;
+      const snapData = magnet ? snapToOHLC(data) : data;
       const drag = dragRef.current;
       const orig = drag.origTl;
-      const dt = data.ts - drag.startTs;
-      const dy = data.price - drag.startPrice;
+      const dt = snapData.ts - drag.startTs;
+      const dy = snapData.price - drag.startPrice;
 
       const updated: TrendLine = { ...orig };
       if (drag.mode === "start") {
@@ -1645,7 +1780,7 @@ export function CandleChart({
 
     crossXRef.current = x;
     render(barsRef.current, days <= 1, x);
-  }, [days, render, pixelToData, updateTl, activeTrendlines]);
+  }, [days, render, pixelToData, updateTl, activeTrendlines, magnet, snapToOHLC]);
 
   const handlePointerLeave = useCallback(() => {
     crossXRef.current = null;
@@ -1692,7 +1827,7 @@ export function CandleChart({
       const s = buildDrawState(
         { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
         barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-        priceZoomRef.current
+        priceZoomRef.current, logScale
       );
       priceZoomAnchorRef.current = {
         y: e.clientY,
@@ -1712,7 +1847,7 @@ export function CandleChart({
       startX: e.clientX,
       startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
     };
-  }, [pixelToData, hitTestTrendline, days]);
+  }, [pixelToData, hitTestTrendline, days, logScale]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     panRef.current = { active: false, startX: 0, startView: [0, 0] };
@@ -1765,7 +1900,7 @@ export function CandleChart({
           const s = buildDrawState(
             { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
             barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-            priceZoomRef.current
+            priceZoomRef.current, logScale
           );
           priceZoomAnchorRef.current = {
             y: e.touches[0].clientY,
@@ -1796,7 +1931,7 @@ export function CandleChart({
         }
       }, 300) };
     }
-  }, [hitTestTrendline, pixelToData, days]);
+  }, [hitTestTrendline, pixelToData, days, logScale]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
@@ -1829,10 +1964,11 @@ export function CandleChart({
       const y = e.touches[0].clientY - rect.top;
       const data = pixelToData(x, y);
       if (!data) return;
+      const snapData = magnet ? snapToOHLC(data) : data;
       const drag = dragRef.current;
       const orig = drag.origTl;
-      const dt = data.ts - drag.startTs;
-      const dy = data.price - drag.startPrice;
+      const dt = snapData.ts - drag.startTs;
+      const dy = snapData.price - drag.startPrice;
 
       const updated: TrendLine = { ...orig };
       if (drag.mode === "start") {
@@ -1895,7 +2031,7 @@ export function CandleChart({
       viewRef.current = { start: newStart, end: newStart + range };
       render(bars, days <= 1, null);
     }
-  }, [days, render, pixelToData, updateTl]);
+  }, [days, render, pixelToData, updateTl, magnet, snapToOHLC]);
 
   const handleTouchEnd = useCallback(() => {
     if (longPressRef.current.timer) {
@@ -1928,7 +2064,7 @@ export function CandleChart({
       const s = buildDrawState(
         { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
         bars, days <= 1, viewRef.current.start, viewRef.current.end || bars.length,
-        priceZoomRef.current
+        priceZoomRef.current, logScale
       );
       const priceAtY = s.yToPrice(e.clientY - rect.top);
       const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
@@ -1955,7 +2091,7 @@ export function CandleChart({
 
     viewRef.current = { start: newStart, end: newStart + newRange };
     render(bars, days <= 1, null);
-  }, [days, render]);
+  }, [days, render, logScale]);
 
   if (!canChart) return null;
 
@@ -1984,6 +2120,22 @@ export function CandleChart({
         ))}
         <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
           <button
+            onClick={() => setDrawTool(drawTool === "line" ? "fib" : "line")}
+            style={{
+              padding: "4px 8px",
+              borderRadius: "6px",
+              border: "none",
+              background: drawTool === "fib" ? "rgba(168,85,247,0.12)" : "transparent",
+              color: drawTool === "fib" ? "rgba(168,85,247,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            FIB
+          </button>
+          <button
             onClick={handleCreateTrendline}
             style={{
               padding: "4px 10px",
@@ -1997,7 +2149,7 @@ export function CandleChart({
               fontFamily: "ui-monospace, SFMono-Regular, monospace",
             }}
           >
-            + Line
+            + {drawTool === "fib" ? "Fib" : "Line"}
           </button>
           <button
             onClick={() => removeTl(selectedTlId!)}
@@ -2014,6 +2166,54 @@ export function CandleChart({
             }}
           >
             Del
+          </button>
+          <button
+            onClick={() => setMagnet(m => !m)}
+            style={{
+              padding: "4px 8px",
+              borderRadius: "6px",
+              border: "none",
+              background: magnet ? "rgba(163,230,53,0.12)" : "transparent",
+              color: magnet ? "rgba(163,230,53,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            MAG
+          </button>
+          <button
+            onClick={() => setLogScale(l => !l)}
+            style={{
+              padding: "4px 8px",
+              borderRadius: "6px",
+              border: "none",
+              background: logScale ? "rgba(56,189,248,0.12)" : "transparent",
+              color: logScale ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            LOG
+          </button>
+          <button
+            onClick={() => setCandleType(c => c === "candle" ? "heikin" : "candle")}
+            style={{
+              padding: "4px 8px",
+              borderRadius: "6px",
+              border: "none",
+              background: candleType === "heikin" ? "rgba(251,191,36,0.12)" : "transparent",
+              color: candleType === "heikin" ? "rgba(251,191,36,0.8)" : "var(--text-dim)",
+              fontSize: "12px",
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            }}
+          >
+            HA
           </button>
           <button
             onClick={() => setIndicator(indicator === "macd" ? "none" : "macd")}
