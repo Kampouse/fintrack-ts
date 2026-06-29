@@ -1508,26 +1508,27 @@ export function CandleChart({
     const vs = viewRef.current.start;
     const mid = Math.floor((vs + ve) / 2);
     const span = Math.max(3, Math.floor((ve - vs) / 6));
-    const midPrice = (s => { // use midpoint of visible price range
+    const { st_lo, st_hi } = (() => {
       const canvas = canvasRef.current;
-      if (!canvas) return bars[Math.min(mid, bars.length - 1)].close;
+      if (!canvas) {
+        const c = bars[Math.min(mid, bars.length - 1)].close;
+        return { st_lo: c * 0.96, st_hi: c * 1.04 };
+      }
       const rect = canvas.getBoundingClientRect();
       const st = buildDrawState(
         { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
         bars, days <= 1, vs, ve, priceZoomRef.current, logScale
       );
-      return (st.lo + st.hi) / 2;
+      // Fib spans full visible chart height
+      return { st_lo: st.lo, st_hi: st.hi };
     })();
-
-    const st_lo = midPrice * 0.96;
-    const st_hi = midPrice * 1.04;
 
     const newTl: TrendLine = {
       id: nextIdRef.current++,
       startTime: parseTime(bars[Math.max(0, mid - span)].time),
-      startPrice: drawTool === "fib" ? st_hi : midPrice,
+      startPrice: st_hi,
       endTime: parseTime(bars[Math.min(bars.length - 1, mid + span)].time),
-      endPrice: drawTool === "fib" ? st_lo : midPrice,
+      endPrice: st_lo,
       color: TL_COLORS[(onTrendlineAdd ? trendlines.length : internalTrendlines.length) % TL_COLORS.length],
       kind: drawTool,
     };
