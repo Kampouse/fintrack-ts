@@ -2093,11 +2093,21 @@ export function CandleChart({
     render(bars, days <= 1, null);
   }, [days, render, logScale]);
 
+  const toolBtn = (active: boolean, bg: string, fg: string): React.CSSProperties => ({
+    padding: "3px 8px", borderRadius: "5px", border: "none",
+    background: active ? bg : "transparent",
+    color: active ? fg : "var(--text-dim)",
+    fontSize: "11px", fontWeight: 500, cursor: "pointer",
+    fontFamily: "ui-monospace, SFMono-Regular, monospace",
+    flexShrink: 0, whiteSpace: "nowrap",
+  });
+
   if (!canChart) return null;
 
   return (
     <div style={{ marginBottom: "16px" }}>
-      <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center", minHeight: 28, overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}
+      {/* Row 1: timeframes + indicators */}
+      <div style={{ display: "flex", gap: "4px", marginBottom: "4px", alignItems: "center", minHeight: 26, overflowX: "auto", scrollbarWidth: "none" }}
         onPointerDown={e => e.stopPropagation()}
       >
         {TF.map((t) => (
@@ -2105,12 +2115,12 @@ export function CandleChart({
             key={t.days}
             onClick={() => setDays(t.days)}
             style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
+              padding: "3px 8px",
+              borderRadius: "5px",
               border: "none",
               background: days === t.days ? "var(--lime-dim)" : "transparent",
               color: days === t.days ? "var(--lime)" : "var(--text-dim)",
-              fontSize: "12px",
+              fontSize: "11px",
               fontWeight: 500,
               cursor: "pointer",
               flexShrink: 0,
@@ -2120,188 +2130,75 @@ export function CandleChart({
             {t.label}
           </button>
         ))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center", flexShrink: 0 }}>
-          <button
-            onClick={() => setDrawTool(drawTool === "line" ? "fib" : "line")}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "none",
-              background: drawTool === "fib" ? "rgba(168,85,247,0.12)" : "transparent",
-              color: drawTool === "fib" ? "rgba(168,85,247,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            FIB
-          </button>
-          <button
-            onClick={handleCreateTrendline}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "none",
-              background: "rgba(255,107,107,0.1)",
-              color: "#ff6b6b",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            + {drawTool === "fib" ? "Fib" : "Line"}
-          </button>
-          <button
-            onClick={() => removeTl(selectedTlId!)}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "none",
-              background: "transparent",
-              color: "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: selectedTlId != null ? "pointer" : "default",
-              visibility: selectedTlId != null ? "visible" : "hidden",
-            }}
-          >
-            Del
-          </button>
-          <button
-            onClick={() => setMagnet(m => !m)}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "none",
-              background: magnet ? "rgba(163,230,53,0.12)" : "transparent",
-              color: magnet ? "rgba(163,230,53,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            MAG
-          </button>
-          <button
-            onClick={() => setLogScale(l => !l)}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "none",
-              background: logScale ? "rgba(56,189,248,0.12)" : "transparent",
-              color: logScale ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            LOG
-          </button>
-          <button
-            onClick={() => setCandleType(c => c === "candle" ? "heikin" : "candle")}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "none",
-              background: candleType === "heikin" ? "rgba(251,191,36,0.12)" : "transparent",
-              color: candleType === "heikin" ? "rgba(251,191,36,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            HA
-          </button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "3px", alignItems: "center", flexShrink: 0 }}>
           <button
             onClick={() => setIndicator(indicator === "macd" ? "none" : "macd")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "none",
-              background: indicator === "macd" ? "rgba(56,189,248,0.12)" : "transparent",
-              color: indicator === "macd" ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            MACD
-          </button>
+            style={toolBtn(indicator === "macd", "rgba(56,189,248,0.12)", "rgba(56,189,248,0.8)")}
+          >MACD</button>
           <button
             onClick={() => setIndicator(indicator === "rsi" ? "none" : "rsi")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "none",
-              background: indicator === "rsi" ? "rgba(168,85,247,0.12)" : "transparent",
-              color: indicator === "rsi" ? "rgba(168,85,247,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            RSI
-          </button>
+            style={toolBtn(indicator === "rsi", "rgba(168,85,247,0.12)", "rgba(168,85,247,0.8)")}
+          >RSI</button>
           <button
             onClick={() => setIndicator(indicator === "zscore" ? "none" : "zscore")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: "none",
-              background: indicator === "zscore" ? "rgba(251,191,36,0.12)" : "transparent",
-              color: indicator === "zscore" ? "rgba(251,191,36,0.8)" : "var(--text-dim)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            Z
-          </button>
+            style={toolBtn(indicator === "zscore", "rgba(251,191,36,0.12)", "rgba(251,191,36,0.8)")}
+          >Z</button>
           {symbol.startsWith("BINANCE:") && (
             <button
               onClick={() => setShowVP(v => !v)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "6px",
-                border: "none",
-                background: showVP ? "rgba(132,204,22,0.12)" : "transparent",
-                color: showVP ? "rgba(163,230,53,0.8)" : "var(--text-dim)",
-                fontSize: "12px",
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: "ui-monospace, SFMono-Regular, monospace",
-              }}
-            >
-              VP
-            </button>
+              style={toolBtn(showVP, "rgba(132,204,22,0.12)", "rgba(163,230,53,0.8)")}
+            >VP</button>
           )}
           {symbol.startsWith("BINANCE:") && (
             <button
               onClick={() => setShowTape(v => !v)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: "6px",
-                border: "none",
-                background: showTape ? "rgba(56,189,248,0.12)" : "transparent",
-                color: showTape ? "rgba(56,189,248,0.8)" : "var(--text-dim)",
-                fontSize: "12px",
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: "ui-monospace, SFMono-Regular, monospace",
-              }}
-            >
-              TAPE
-            </button>
+              style={toolBtn(showTape, "rgba(56,189,248,0.12)", "rgba(56,189,248,0.8)")}
+            >TAPE</button>
           )}
         </div>
+      </div>
+      {/* Row 2: drawing + chart mode tools */}
+      <div style={{ display: "flex", gap: "3px", marginBottom: "8px", alignItems: "center", minHeight: 26, overflowX: "auto", scrollbarWidth: "none" }}
+        onPointerDown={e => e.stopPropagation()}
+      >
+        <button
+          onClick={() => setDrawTool(drawTool === "line" ? "fib" : "line")}
+          style={toolBtn(drawTool === "fib", "rgba(168,85,247,0.12)", "rgba(168,85,247,0.8)")}
+        >FIB</button>
+        <button
+          onClick={handleCreateTrendline}
+          style={{
+            padding: "3px 8px", borderRadius: "5px", border: "none",
+            background: "rgba(255,107,107,0.1)", color: "#ff6b6b",
+            fontSize: "11px", fontWeight: 500, cursor: "pointer",
+            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            flexShrink: 0, whiteSpace: "nowrap",
+          }}
+        >+ {drawTool === "fib" ? "Fib" : "Line"}</button>
+        <button
+          onClick={() => removeTl(selectedTlId!)}
+          style={{
+            padding: "3px 8px", borderRadius: "5px", border: "none",
+            background: "transparent", color: "var(--text-dim)",
+            fontSize: "11px", fontWeight: 500,
+            cursor: selectedTlId != null ? "pointer" : "default",
+            visibility: selectedTlId != null ? "visible" : "hidden",
+            flexShrink: 0,
+          }}
+        >Del</button>
+        <div style={{ width: 1, height: 16, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
+        <button
+          onClick={() => setMagnet(m => !m)}
+          style={toolBtn(magnet, "rgba(163,230,53,0.12)", "rgba(163,230,53,0.8)")}
+        >MAG</button>
+        <button
+          onClick={() => setLogScale(l => !l)}
+          style={toolBtn(logScale, "rgba(56,189,248,0.12)", "rgba(56,189,248,0.8)")}
+        >LOG</button>
+        <button
+          onClick={() => setCandleType(c => c === "candle" ? "heikin" : "candle")}
+          style={toolBtn(candleType === "heikin", "rgba(251,191,36,0.12)", "rgba(251,191,36,0.8)")}
+        >HA</button>
       </div>
       <div
         style={{
