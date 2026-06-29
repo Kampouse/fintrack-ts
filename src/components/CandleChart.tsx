@@ -1594,6 +1594,13 @@ export function CandleChart({
       return;
     }
 
+    // Measure drag (Shift+drag desktop)
+    if (measureActiveRef.current && (e as React.PointerEvent).buttons === 1) {
+      measureRef.current = { x1: measureRef.current!.x1, x2: x };
+      render(bars, days <= 1, null);
+      return;
+    }
+
     // Panning (desktop)
     if (panRef.current.active && (e as React.PointerEvent).buttons === 1) {
       const dx = (e as React.PointerEvent).clientX - panRef.current.startX;
@@ -1653,6 +1660,16 @@ export function CandleChart({
     const y = e.clientY - rect.top;
     const data = pixelToData(x, y);
 
+    // Shift+click+drag → measure tool (desktop)
+    if (e.shiftKey) {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      measureRef.current = { x1: x, x2: x };
+      measureActiveRef.current = true;
+      setSelectedTlId(null);
+      if (barsRef.current.length) render(barsRef.current, days <= 1, null);
+      return;
+    }
+
     // Hit-test trendlines
     if (data) {
       const hit = hitTestTrendline(x, y);
@@ -1702,6 +1719,11 @@ export function CandleChart({
     priceZoomAnchorRef.current = null;
     dragRef.current = null;
     dragTrendlinesRef.current = null;
+    if (measureActiveRef.current) {
+      measureActiveRef.current = false;
+      measureRef.current = null;
+      if (barsRef.current.length) renderRef.current(barsRef.current, false);
+    }
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
