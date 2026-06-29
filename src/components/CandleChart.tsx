@@ -2097,7 +2097,7 @@ export function CandleChart({
 
   return (
     <div style={{ marginBottom: "16px" }}>
-      <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center", minHeight: 28 }}
+      <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center", minHeight: 28, overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}
         onPointerDown={e => e.stopPropagation()}
       >
         {TF.map((t) => (
@@ -2113,12 +2113,14 @@ export function CandleChart({
               fontSize: "12px",
               fontWeight: 500,
               cursor: "pointer",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
             }}
           >
             {t.label}
           </button>
         ))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "4px", alignItems: "center", flexShrink: 0 }}>
           <button
             onClick={() => setDrawTool(drawTool === "line" ? "fib" : "line")}
             style={{
