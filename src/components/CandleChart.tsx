@@ -2305,6 +2305,13 @@ export function CandleChart({
       {/* Tape — trade feed below chart */}
       {showTape && symbol.startsWith("BINANCE:") && trades.length > 0 && (() => {
         const fmtP = fmtPrice;
+        const fmtQ = (n: number) => {
+          const abs = Math.abs(n);
+          if (abs >= 1000) return n.toFixed(0);
+          if (abs >= 1) return n.toFixed(2);
+          if (abs >= 0.01) return n.toFixed(4);
+          return n.toFixed(6);
+        };
         const fmtT = (t: number) => {
           const d = new Date(t);
           return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
@@ -2347,7 +2354,7 @@ export function CandleChart({
                 }}>
                   <span style={{ color: "rgba(255,255,255,0.3)" }}>{fmtT(t.time)}</span>
                   <span style={{ textAlign: "right", color: t.isBuyerMaker ? "rgba(248,113,113,0.9)" : "rgba(83,255,132,0.9)" }}>{fmtP(t.price)}</span>
-                  <span style={{ textAlign: "right", color: "rgba(255,255,255,0.5)" }}>{t.qty.toFixed(t.qty >= 100 ? 0 : t.qty >= 1 ? 2 : 4)}</span>
+                  <span style={{ textAlign: "right", color: "rgba(255,255,255,0.5)" }}>{fmtQ(t.qty)}</span>
                 </div>
               ))}
             </div>
