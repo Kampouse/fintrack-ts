@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import type { Transaction } from "@/types";
-import { fmtUsd, fmtDate, toLocalInput, fromLocalInput } from "@/lib/format";
+import { fmtUsdPrice, fmtQty, fmtDate, toLocalInput, fromLocalInput } from "@/lib/format";
 import { card, input } from "@/lib/styles";
 
 interface Props {
@@ -45,7 +45,7 @@ export function EditLotSheet({ lot, onClose, onSave }: Props) {
         </div>
 
         <div style={{ ...card, padding: "10px 14px", marginBottom: "16px", fontSize: "13px", color: "var(--text-dim)" }}>
-          Editing: {fmtNum(parseFloat(qty) || 0)} @ {fmtUsd(parseFloat(price) || 0)} - {fmtDate(fromLocalInput(ts))}
+          Editing: {fmtQty(parseFloat(qty) || 0)} @ {fmtUsdPrice(parseFloat(price) || 0)} - {fmtDate(fromLocalInput(ts))}
         </div>
 
         <div style={{ marginBottom: "12px" }}>
@@ -90,8 +90,4 @@ export function EditLotSheet({ lot, onClose, onSave }: Props) {
       </div>
     </>
   );
-}
-
-function fmtNum(n: number): string {
-  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }

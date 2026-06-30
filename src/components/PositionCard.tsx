@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown } from "lucide-react";
 import type { EnrichedPosition } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { Sparkline } from "./Sparkline";
-import { fmtUsd, fmtPct, fmtNum } from "@/lib/format";
+import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty } from "@/lib/format";
 import { theme } from "@/lib/styles";
 import { useSwipe } from "@/hooks/useSwipe";
 
@@ -94,11 +94,11 @@ export function PositionCard({ pos, onClick, onDelete }: Props) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "2px" }}>
               <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>
-                {fmtNum(pos.qty)} {pos.label}
+                {fmtQty(pos.qty)} {pos.label}
                 {lotCount > 1 && ` · ${lotCount}`}
               </span>
               <span style={{ fontSize: "13px", color: "var(--text-dim)", fontFamily: theme.mono }}>
-                {pos.price != null ? fmtUsd(pos.price) : "--"}
+                {pos.price != null ? fmtUsdPrice(pos.price) : "--"}
               </span>
             </div>
           </div>

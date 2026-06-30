@@ -7,7 +7,7 @@ import { CandleChart } from "./CandleChart";
 import type { PriceLevel } from "./CandleChart";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";
-import { fmtUsd, fmtPct, fmtNum, fmtDate } from "@/lib/format";
+import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty, fmtDate } from "@/lib/format";
 import { card, btnIcon, row, theme } from "@/lib/styles";
 
 interface Props {
@@ -83,11 +83,11 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: 12 }}>
       <div>
         <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Price</div>
-        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(price)}</div>
       </div>
       <div>
         <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Qty</div>
-        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtQty(totalQty)}</div>
       </div>
       <div>
         <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>P&L</div>
@@ -97,7 +97,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
       </div>
       <div>
         <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg</div>
-        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+        <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(avgCost)}</div>
       </div>
     </div>
   );
@@ -122,7 +122,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
                 <div>
                   <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>#{i + 1}</span>
                   <span style={{ fontSize: "15px", fontWeight: 500, marginLeft: "8px", fontFamily: theme.mono }}>
-                    {fmtNum(lot.qty)} @ {fmtUsd(lot.price)}
+                    {fmtQty(lot.qty)} @ {fmtUsdPrice(lot.price)}
                   </span>
                   <span style={{ fontSize: "12px", color: "var(--text-dim)", marginLeft: "8px" }}>{fmtDate(lot.ts)}</span>
                 </div>
@@ -158,7 +158,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
               </div>
               {i > 0 && (
                 <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "4px", marginLeft: "20px", fontFamily: theme.mono }}>
-                  Avg cost after this lot: {fmtUsd(runAvg)}
+                  Avg cost after this lot: {fmtUsdPrice(runAvg)}
                 </div>
               )}
               {lot.note && (
@@ -260,11 +260,11 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(price)}</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(price)}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtNum(totalQty)}</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtQty(totalQty)}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
@@ -274,7 +274,7 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
                 </div>
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(avgCost)}</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(avgCost)}</div>
                 </div>
               </div>
             </div>
