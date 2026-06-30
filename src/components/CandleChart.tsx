@@ -45,9 +45,11 @@ const TF = [
 const TL_COLORS = ["#ff6b6b", "#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#fb923c", "#67e8f9"];
 
 function fmtPrice(p: number): string {
-  if (p >= 1000) return p.toFixed(0);
-  if (p >= 1) return p.toFixed(2);
-  return p.toFixed(4);
+  if (p >= 1000) return p.toFixed(2);
+  if (p >= 100) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(3);
+  if (p >= 0.01) return p.toFixed(4);
+  return p.toFixed(6);
 }
 
 function fmtVol(v: number): string {
@@ -665,7 +667,7 @@ function drawFib(
 
     // Price label on the RIGHT side (like TradingView)
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-    const labelText = `${label}  ${price >= 1000 ? price.toFixed(0) : price.toFixed(2)}`;
+    const labelText = `${label}  ${fmtPrice(price)}`;
     const lw = ctx.measureText(labelText).width + 8;
     ctx.fillStyle = color + "20";
     ctx.fillRect(fullRight - lw - 2, y - 7, lw, 13);
@@ -885,7 +887,7 @@ function drawChart(
   ctx.setLineDash([]);
 
   // Price tag on right axis
-  const tagLabel = lastBar.close >= 1000 ? lastBar.close.toFixed(0) : lastBar.close.toFixed(2);
+  const tagLabel = fmtPrice(lastBar.close);
   ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
   const tagW = ctx.measureText(tagLabel).width + 10;
   ctx.fillStyle = isUp ? "#53ff84" : "#f87171";
@@ -911,7 +913,7 @@ function drawChart(
     ctx.beginPath(); ctx.moveTo(padLeft, ly); ctx.lineTo(w - padRight, ly); ctx.stroke();
     ctx.setLineDash([]);
 
-    const lvlLabel = level.price >= 1000 ? level.price.toFixed(0) : level.price.toFixed(2);
+    const lvlLabel = fmtPrice(level.price);
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     const lvlText = level.label + " " + lvlLabel;
     const lvlW = ctx.measureText(lvlText).width + 8;
@@ -963,13 +965,13 @@ function drawChart(
 
       ctx.fillText(timeLabel, tx + 8, ty + 6);
       ctx.fillStyle = "#53ff84";
-      ctx.fillText(`O ${b.open.toFixed(2)}`, tx + 8, ty + 20);
+      ctx.fillText(`O ${fmtPrice(b.open)}`, tx + 8, ty + 20);
       ctx.fillStyle = "#f87171";
-      ctx.fillText(`H ${b.high.toFixed(2)}`, tx + 72, ty + 20);
+      ctx.fillText(`H ${fmtPrice(b.high)}`, tx + 72, ty + 20);
       ctx.fillStyle = "#53ff84";
-      ctx.fillText(`L ${b.low.toFixed(2)}`, tx + 8, ty + 34);
+      ctx.fillText(`L ${fmtPrice(b.low)}`, tx + 8, ty + 34);
       ctx.fillStyle = "#f87171";
-      ctx.fillText(`C ${b.close.toFixed(2)}`, tx + 72, ty + 34);
+      ctx.fillText(`C ${fmtPrice(b.close)}`, tx + 72, ty + 34);
     }
   }
 
@@ -995,7 +997,7 @@ function drawChart(
   for (let i = 0; i <= 3; i++) {
     const p = lo + (totalRange / 3) * i;
     const y = priceToY(p);
-    const label = p >= 1000 ? p.toFixed(0) : p.toFixed(2);
+    const label = fmtPrice(p);
     ctx.fillStyle = "rgba(255,255,255,0.5)";
     ctx.fillText(label, w - padRight + 6, y);
   }
@@ -2302,7 +2304,7 @@ export function CandleChart({
       )}
       {/* Tape — trade feed below chart */}
       {showTape && symbol.startsWith("BINANCE:") && trades.length > 0 && (() => {
-        const fmtP = (p: number) => p >= 1000 ? p.toFixed(0) : p >= 1 ? p.toFixed(2) : p.toFixed(4);
+        const fmtP = fmtPrice;
         const fmtT = (t: number) => {
           const d = new Date(t);
           return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
