@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Search } from "lucide-react";
-import { searchSymbols, type SearchResult } from "@/api/finnhub";
+import { getMarketTickers, type MarketTicker } from "@/api/binance";
 
 interface Props {
   onClose: () => void;
@@ -10,23 +10,34 @@ interface Props {
 
 export function SearchModal({ onClose, onAdd, watchlist }: Props) {
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<MarketTicker[]>([]);
+  const [allTickers, setAllTickers] = useState<MarketTicker[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleSearch = (q: string) => {
-    setSearch(q);
-    if (q.length < 1) {
+  // Load all tickers on mount
+  useEffect(() => {
+    getMarketTickers().then((tickers) => {
+      setAllTickers(tickers);
+      setLoading(false);
+    });
+  }, []);
+
+  // Filter locally based on search
+  useEffect(() => {
+    if (search.length < 1) {
       setResults([]);
       return;
     }
-    setSearching(true);
-    const timeout = setTimeout(() => {
-      searchSymbols(q)
-        .then(setResults)
-        .finally(() => setSearching(false));
-    }, 300);
-    return () => clearTimeout(timeout);
-  };
+    
+    const q = search.toLowerCase();
+    const filtered = allTickers
+      .filter((t) => 
+        t.baseAsset.toLowerCase().includes(q) ||
+        t.symbol.toLowerCase().includes(q)
+      )
+      .slice(0, 20);
+    setResults(filtered);
+  }, [search, allTickers]);
 
   return (
     <div
@@ -70,7 +81,7 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
             type="text"
             placeholder="Search crypto..."
             value={search}
-            onChange={(e) => handleSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             autoFocus
             style={{
               flex: 1,
@@ -97,33 +108,32 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
 
         {/* Results */}
         <div style={{ flex: 1, overflow: "auto", padding: "8px 0" }}>
-          {searching && (
+          {loading && (
             <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              Searching...
+              Loading...
             </div>
           )}
 
-          {!searching && search.length === 0 && (
+          {!loading && search.length === 0 && (
             <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
               Type to search for crypto assets
             </div>
           )}
 
-          {!searching && results.length > 0 && (
-            results.slice(0, 10).map((r) => {
-              const symbol = r.symbol.includes(":") ? r.symbol : `BINANCE:${r.symbol}USDT`;
-              const isWatched = watchlist.includes(symbol);
+          {!loading && results.length > 0 && (
+            results.map((t) => {
+              const isWatched = watchlist.includes(t.symbol);
               return (
                 <div
-                  key={symbol}
+                  key={t.symbol}
                   onClick={() => {
                     if (!isWatched) {
-                      onAdd(symbol);
+                      onAdd(t.symbol);
                     }
                     onClose();
                   }}
                   style={{
-                    padding: "12px 16px",
+                    padding: "10px 16px",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
@@ -138,21 +148,34 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
                     if (!isWatched) e.currentTarget.style.background = "transparent";
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{r.displaySymbol}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{r.description}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t.baseAsset}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "monospace" }}>
+                      ${t.price >= 1 ? t.price.toFixed(2) : t.price.toFixed(6)}
+                    </div>
                   </div>
-                  {isWatched && (
-                    <span style={{ fontSize: 10, color: "var(--lime)" }}>In watchlist</span>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "monospace",
+                        color: t.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
+                      }}
+                    >
+                      {t.changePercent >= 0 ? "+" : ""}{t.changePercent.toFixed(1)}%
+                    </div>
+                    {isWatched && (
+                      <span style={{ fontSize: 10, color: "var(--lime)" }}>✓</span>
+                    )}
+                  </div>
                 </div>
               );
             })
           )}
 
-          {!searching && search.length > 0 && results.length === 0 && (
+          {!loading && search.length > 0 && results.length === 0 && (
             <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No results found
+              No results found for "{search}"
             </div>
           )}
         </div>
