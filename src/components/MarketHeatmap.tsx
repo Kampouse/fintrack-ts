@@ -262,11 +262,9 @@ function HeatmapGrid({
                   <div style={{ fontSize: 11, fontFamily: MONO, color: "rgba(0,0,0,0.7)" }}>
                     {t.changePercent >= 0 ? "+" : ""}{t.changePercent.toFixed(1)}%
                   </div>
-                  {isHovered && (
-                    <div style={{ fontSize: 10, fontFamily: MONO, color: "rgba(0,0,0,0.6)" }}>
-                      ${fmtPrice(t.price)} • {fmtVol(t.quoteVolume)}
-                    </div>
-                  )}
+                  <div style={{ fontSize: 10, fontFamily: MONO, color: "rgba(0,0,0,0.6)" }}>
+                    ${fmtPrice(t.price)} • {fmtVol(t.quoteVolume)}
+                  </div>
                 </div>
               );
             })}
