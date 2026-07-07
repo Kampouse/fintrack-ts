@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { HashRouter, Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
 import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
@@ -21,7 +22,6 @@ import { btnIcon, theme } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
-type Tab = "portfolio" | "terminal";
 
 const SORT_LABELS: Record<SortKey, string> = {
   value: "Value",
@@ -30,22 +30,19 @@ const SORT_LABELS: Record<SortKey, string> = {
   change: "24h",
 };
 
-export default function App() {
+function PortfolioView() {
   const { txs, setTxs, addLot, updateLot, removeLot } = useTransactions();
   const [showAdd, setShowAdd] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
-  const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
-  const [chartPreview, setChartPreview] = useState<string | null>(null);
-  const [terminalView, setTerminalView] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>("portfolio");
   const [showWatch, setShowWatch] = useState(false);
   const [showSortDD, setShowSortDD] = useState(false);
   const sortDDRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
-  const [pageTransition, setPageTransition] = useState<"enter" | "exit" | null>(null);
+  const [chartPreview, setChartPreview] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -60,14 +57,7 @@ export default function App() {
 
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
-  const symbols = useMemo(() => {
-    const all = new Set(positionSymbols);
-    if (detailSymbol) all.add(detailSymbol);
-    return [...all];
-  }, [positionSymbols, detailSymbol]);
-
-  // Live quotes via server-side proxy (key never reaches client)
-  const { quotes, /* refreshQuotes */ } = useQuotes(symbols);
+  const { quotes } = useQuotes(positionSymbols);
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
@@ -76,7 +66,7 @@ export default function App() {
   const [remoteCount, setRemoteCount] = useState<number | null>(null);
   const { push: pushToKv } = useSyncPush();
 
-  // Probe remote count when sync sheet opens and connected
+  // Probe remote count when sync sheet opens
   useEffect(() => {
     if (!showSync || !isConnected || !syncOn) return;
     pullPositions(accountId!).then((data) => {
@@ -135,28 +125,6 @@ export default function App() {
     });
   }, [enriched, sortKey, sortAsc]);
 
-  // Navigate to detail with transition
-  const openDetail = useCallback((symbol: string) => {
-    setPageTransition("exit");
-    setTimeout(() => {
-      setDetailSymbol(symbol);
-      setPageTransition("enter");
-    }, 220);
-  }, []);
-
-  const closeDetail = useCallback(() => {
-    setPageTransition("exit");
-    setTimeout(() => {
-      setDetailSymbol(null);
-      setPageTransition(null);
-    }, 220);
-  }, []);
-
-  // Tab change: search tab opens add sheet, settings opens sync
-  const handleTabChange = useCallback((tab: Tab) => {
-    setActiveTab(tab);
-  }, []);
-
   // Sync: push
   const handlePush = useCallback(async () => {
     if (!isConnected || syncing) return;
@@ -172,7 +140,7 @@ export default function App() {
     }
   }, [isConnected, syncing, txs, pushToKv]);
 
-  // Sync: pull — fetch remote, merge with local (local wins on id conflict)
+  // Sync: pull
   const handlePull = useCallback(async () => {
     if (!isConnected || !accountId || syncing) return;
     setSyncing(true);
@@ -184,7 +152,6 @@ export default function App() {
       }
       const remoteTxs = remote as Transaction[];
       const localIds = new Set(txs.map(t => t.id));
-      // Add only remote positions not already present locally
       const newRemote = remoteTxs.filter(t => !localIds.has(t.id));
       const merged = [...txs, ...newRemote];
       setTxs(merged);
@@ -208,125 +175,6 @@ export default function App() {
     }
   }, [syncOn]);
 
-  // Detail view
-  if (detailSymbol) {
-    return (
-      <div className={pageTransition === "enter" ? "page-enter" : pageTransition === "exit" ? "page-exit" : ""} style={{ maxWidth: 768, margin: "0 auto", padding: "20px var(--app-hpad, 16px) 40px" }}>
-      <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
-        <PositionDetail
-          symbol={detailSymbol}
-          txs={txs}
-          quote={quotes[detailSymbol]}
-          onBack={closeDetail}
-          onRemoveLot={removeLot}
-          onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}
-          onAddLot={() => {
-            setPreselectSymbol(detailSymbol);
-            setDetailSymbol(null);
-            setShowAdd(true);
-          }}
-          terminal={terminalView}
-          onToggleTerminal={() => setTerminalView(!terminalView)}
-        />
-        {showAdd && (
-          <AddSheet
-            onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-            onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
-            preselect={preselectSymbol}
-          />
-        )}
-      </div>
-    );
-  }
-
-  // Terminal View - Full Width
-  if (activeTab === "terminal") {
-    return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-        <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
-        {/* Desktop header with tabs */}
-        <div className="desktop-header">
-          <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); align-items: center; justify-content: space-between; } }`}</style>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-            <div style={{ display: "flex", gap: 4 }}>
-              <button
-                onClick={() => setActiveTab("portfolio")}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--card-border)",
-                  background: "transparent",
-                  color: "var(--text-dim)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: theme.mono,
-                  cursor: "pointer",
-                }}
-              >
-                Portfolio
-              </button>
-              <button
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--card-border)",
-                  background: "var(--lime-dim)",
-                  color: "var(--lime)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: theme.mono,
-                  cursor: "pointer",
-                }}
-              >
-                Terminal
-              </button>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {isConnected && (
-              <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
-                {accountId}
-              </span>
-            )}
-            <button
-              onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
-              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-            >
-              + Add
-            </button>
-          </div>
-        </div>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <TerminalView
-            positions={enriched}
-            onSelect={(symbol) => openDetail(symbol)}
-          />
-        </div>
-        <TabBar
-          active={activeTab}
-          onChange={handleTabChange}
-          onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
-          onWatch={() => setShowWatch(true)}
-        />
-        {showAdd && (
-          <AddSheet
-            onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-            onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
-            preselect={preselectSymbol}
-          />
-        )}
-        {showWatch && (
-          <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); }} />
-        )}
-        {chartPreview && (
-          <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
-        )}
-      </div>
-    );
-  }
-
-  // Portfolio View
   return (
     <div style={{ minHeight: "100vh" }} className="portfolio-view">
       <style>{`
@@ -344,7 +192,6 @@ export default function App() {
           <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
           <div style={{ display: "flex", gap: 4 }}>
             <button
-              onClick={() => setActiveTab("portfolio")}
               style={{
                 padding: "4px 10px",
                 borderRadius: 6,
@@ -360,7 +207,7 @@ export default function App() {
               Portfolio
             </button>
             <button
-              onClick={() => setActiveTab("terminal")}
+              onClick={() => navigate("/terminal")}
               style={{
                 padding: "4px 10px",
                 borderRadius: 6,
@@ -492,7 +339,7 @@ export default function App() {
             <PositionCard
               key={pos.symbol}
               pos={pos}
-              onClick={() => openDetail(pos.symbol)}
+              onClick={() => navigate(`/position/${encodeURIComponent(pos.symbol)}`)}
               onDelete={() => pos.lots.forEach((l) => removeLot(l.id))}
             />
           ))
@@ -534,12 +381,197 @@ export default function App() {
         <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
       )}
       <TabBar
-        active={activeTab}
-        onChange={handleTabChange}
+        active="portfolio"
+        onChange={(tab) => { if (tab === "terminal") navigate("/terminal"); }}
         onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
         onWatch={() => setShowWatch(true)}
       />
       </div>
     </div>
+  );
+}
+
+function TerminalRoute() {
+  const { txs, addLot } = useTransactions();
+  const { accountId, isConnected, connect, disconnect } = useNearAuth();
+  const navigate = useNavigate();
+  const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
+  const { quotes } = useQuotes(positionSymbols);
+
+  // Aggregate transactions into positions
+  const positions: Position[] = useMemo(() => {
+    const map = new Map<string, Position>();
+    for (const tx of txs) {
+      const existing = map.get(tx.symbol);
+      if (existing) {
+        existing.lots.push(tx);
+        existing.qty += tx.qty;
+        existing.totalCost += tx.qty * tx.price;
+        existing.avgCost = existing.totalCost / existing.qty;
+      } else {
+        map.set(tx.symbol, {
+          symbol: tx.symbol,
+          label: labelFromSymbol(tx.symbol),
+          qty: tx.qty,
+          totalCost: tx.qty * tx.price,
+          avgCost: tx.price,
+          lots: [tx],
+        });
+      }
+    }
+    return [...map.values()];
+  }, [txs]);
+
+  // Enrich positions with live quote data
+  const enriched: EnrichedPosition[] = useMemo(() => {
+    return positions.map((p) => {
+      const q = quotes[p.symbol];
+      const price = q?.price ?? null;
+      const value = price != null ? price * p.qty : null;
+      const pnl = value != null ? value - p.totalCost : null;
+      const pnlPct = p.totalCost > 0 && pnl != null ? (pnl / p.totalCost) * 100 : null;
+      const dayChange = value != null && q?.changePct != null ? (value * q.changePct) / 100 : null;
+      return { ...p, price, value, pnl, pnlPct, dayChange, changePct: q?.changePct ?? null };
+    });
+  }, [positions, quotes]);
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
+
+  return (
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
+      {/* Desktop header with tabs */}
+      <div className="desktop-header">
+        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); align-items: center; justify-content: space-between; } }`}</style>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              onClick={() => navigate("/")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "transparent",
+                color: "var(--text-dim)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
+            >
+              Portfolio
+            </button>
+            <button
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "var(--lime-dim)",
+                color: "var(--lime)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
+            >
+              Terminal
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {isConnected && (
+            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+              {accountId}
+            </span>
+          )}
+          <button
+            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+          >
+            + Add
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <TerminalView
+          positions={enriched}
+          onSelect={(symbol) => navigate(`/position/${encodeURIComponent(symbol)}`)}
+        />
+      </div>
+      <TabBar
+        active="terminal"
+        onChange={(tab) => { if (tab === "portfolio") navigate("/"); }}
+        onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
+        onWatch={() => {}}
+      />
+      {showAdd && (
+        <AddSheet
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
+          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+          preselect={preselectSymbol}
+        />
+      )}
+    </div>
+  );
+}
+
+function PositionRoute() {
+  const { symbol } = useParams<{ symbol: string }>();
+  const decodedSymbol = symbol ? decodeURIComponent(symbol) : "";
+  const navigate = useNavigate();
+  const { txs, addLot, updateLot, removeLot } = useTransactions();
+  const positionSymbols = useMemo(() => {
+    const all = new Set(txs.map((t) => t.symbol));
+    if (decodedSymbol) all.add(decodedSymbol);
+    return [...all];
+  }, [txs, decodedSymbol]);
+  const { quotes } = useQuotes(positionSymbols);
+  const [showAdd, setShowAdd] = useState(false);
+  const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
+  const [terminalView, setTerminalView] = useState(false);
+
+  if (!decodedSymbol) {
+    return <div style={{ padding: 20 }}>Position not found</div>;
+  }
+
+  return (
+    <div style={{ maxWidth: 768, margin: "0 auto", padding: "20px var(--app-hpad, 16px) 40px" }}>
+      <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
+      <PositionDetail
+        symbol={decodedSymbol}
+        txs={txs}
+        quote={quotes[decodedSymbol]}
+        onBack={() => navigate(-1)}
+        onRemoveLot={removeLot}
+        onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}
+        onAddLot={() => {
+          setPreselectSymbol(decodedSymbol);
+          setShowAdd(true);
+        }}
+        terminal={terminalView}
+        onToggleTerminal={() => setTerminalView(!terminalView)}
+      />
+      {showAdd && (
+        <AddSheet
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
+          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+          preselect={preselectSymbol}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <HashRouter>
+      <Routes>
+        <Route path="/" element={<PortfolioView />} />
+        <Route path="/terminal" element={<TerminalRoute />} />
+        <Route path="/position/:symbol" element={<PositionRoute />} />
+      </Routes>
+    </HashRouter>
   );
 }
