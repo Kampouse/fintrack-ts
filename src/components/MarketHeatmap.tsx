@@ -87,10 +87,10 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
   }
 
   return (
-    <div style={{ padding: "8px 12px", height: "100%", overflow: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+    <div style={{ padding: "12px", height: "100%", overflow: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
       <style>{`::-webkit-scrollbar { display: none }`}</style>
       {/* Tab Bar */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 12, marginTop: 8 }}>
         {(["heatmap", "gainers", "losers", "volume"] as const).map((v) => (
           <button
             key={v}
@@ -204,10 +204,10 @@ function HeatmapGrid({
   };
 
   return (
-    <div style={{ padding: "8px 12px", height: "100%", overflow: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+    <div style={{ padding: "12px", height: "100%", overflow: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
       <style>{`::-webkit-scrollbar { display: none }`}</style>
       {/* Legend */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, marginBottom: 12, alignItems: "center" }}>
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
           Size = Volume • Color = 24h % Change
         </div>
