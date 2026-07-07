@@ -292,10 +292,12 @@ export default function App() {
             </button>
           </div>
         </div>
-        <TerminalView
-          positions={enriched}
-          onSelect={(symbol) => openDetail(symbol)}
-        />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <TerminalView
+            positions={enriched}
+            onSelect={(symbol) => openDetail(symbol)}
+          />
+        </div>
         <TabBar
           active={activeTab}
           onChange={handleTabChange}
