@@ -187,64 +187,6 @@ export function TerminalWidgets({ onSelectSymbol, watchlist, onToggleWatchlist }
           />
         ))}
       </WidgetSection>
-
-      {/* Top Gainers */}
-      <WidgetSection title="Top Gainers" icon={<TrendingUp size={12} color="var(--gain)" />}>
-        {loading ? (
-          <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 10 }}>Loading...</div>
-        ) : (
-          gainers.map((t) => (
-            <TickerRow
-              key={t.symbol}
-              ticker={t}
-              onClick={() => {
-                if (!watchlist.includes(t.symbol)) onToggleWatchlist(t.symbol);
-                onSelectSymbol(t.symbol);
-              }}
-            />
-          ))
-        )}
-      </WidgetSection>
-
-      {/* Top Losers */}
-      <WidgetSection title="Top Losers" icon={<TrendingDown size={12} color="var(--loss)" />}>
-        {loading ? (
-          <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 10 }}>Loading...</div>
-        ) : (
-          losers.map((t) => (
-            <TickerRow
-              key={t.symbol}
-              ticker={t}
-              onClick={() => {
-                if (!watchlist.includes(t.symbol)) onToggleWatchlist(t.symbol);
-                onSelectSymbol(t.symbol);
-              }}
-            />
-          ))
-        )}
-      </WidgetSection>
-
-      {/* Volume */}
-      <WidgetSection title="Highest Volume" icon={<BarChart2 size={12} />}>
-        {loading ? (
-          <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 10 }}>Loading...</div>
-        ) : (
-          [...tickers]
-            .sort((a, b) => b.quoteVolume - a.quoteVolume)
-            .slice(0, 5)
-            .map((t) => (
-              <TickerRow
-                key={t.symbol}
-                ticker={t}
-                showVolume
-                onClick={() => {
-                  if (!watchlist.includes(t.symbol)) onToggleWatchlist(t.symbol);
-                  onSelectSymbol(t.symbol);
-                }}
-              />
-            ))
-        )}
-      </WidgetSection>
     </div>
   );
 }
