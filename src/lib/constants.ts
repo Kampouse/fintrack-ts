@@ -48,7 +48,80 @@ const _cgIdCache = new Map<string, string>();
 for (const c of ALL_SYMBOLS) _cgIdCache.set(c.symbol, c.cgId);
 
 export function cgIdFromSymbol(symbol: string): string | null {
-  return _cgIdCache.get(symbol) ?? null;
+  // Check known mappings first
+  const known = _cgIdCache.get(symbol);
+  if (known) return known;
+  
+  // Fallback: try to construct CoinGecko ID from symbol
+  // e.g., BINANCE:PEPEUSDT -> "pepe", BINANCE:WIFUSDT -> "dogwifhat"
+  const base = symbol.replace("BINANCE:", "").replace("USDT", "").toLowerCase();
+  
+  // Common mappings for popular but not hardcoded symbols
+  const commonIds: Record<string, string> = {
+    "pepe": "pepe",
+    "wif": "dogwifhat",
+    "bonk": "bonk",
+    "floki": "floki",
+    "shib": "shiba-inu",
+    "shibainu": "shiba-inu",
+    "rndr": "render-token",
+    "tao": "bittensor",
+    "jup": "jupiter-exchange-solana",
+    "pyth": "pyth-network",
+    "ondo": "ondo-finance",
+    "sei": "sei-network",
+    "tia": "celestia",
+    "strk": "starknet",
+    "manta": "manta-network",
+    "aevo": "aevo",
+    "ena": "ethena",
+    "w": "wormhole",
+    "wormhole": "wormhole",
+    "fetch": "fetch-ai",
+    "fet": "fetch-ai",
+    "agix": "singularitynet",
+    "ocean": "ocean-protocol",
+    "cfx": "conflux-token",
+    "hbar": "hedera-hashgraph",
+    "kas": "kaspa",
+    "kaspa": "kaspa",
+    "fil": "filecoin",
+    "ar": "arweave",
+    "theta": "theta-token",
+    "ftm": "fantom",
+    "gmx": "gmx",
+    "dydx": "dydx",
+    "blur": "blur",
+    "ape": "apecoin",
+    "meme": "memecoin",
+    "1000pepe": "pepe",
+    "1000bonk": "bonk",
+    "1000shib": "shiba-inu",
+    "1000floki": "floki",
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "bnb": "binancecoin",
+    "sol": "solana",
+    "near": "near",
+    "xrp": "ripple",
+    "ada": "cardano",
+    "doge": "dogecoin",
+    "avax": "avalanche-2",
+    "link": "chainlink",
+    "dot": "polkadot",
+    "matic": "matic-network",
+    "ltc": "litecoin",
+    "uni": "uniswap",
+    "atom": "cosmos",
+    "apt": "aptos",
+    "arb": "arbitrum",
+    "op": "optimism",
+    "inj": "injective-protocol",
+    "sui": "sui",
+    "zec": "zcash",
+  };
+  
+  return commonIds[base] ?? base;
 }
 
 const _labelCache = new Map<string, string>();
