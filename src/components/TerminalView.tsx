@@ -429,6 +429,8 @@ export function TerminalView({ positions, onSelect }: Props) {
                 minWidth: isMobile ? 260 : 220,
                 height: "100%",
                 overflow: "auto",
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
                 borderRight: "1px solid var(--card-border)",
                 background: "var(--bg)",
                 display: "flex",
@@ -439,6 +441,7 @@ export function TerminalView({ positions, onSelect }: Props) {
                 zIndex: isMobile ? 100 : "auto",
               }}
             >
+              <style>{`.terminal-sidebar::-webkit-scrollbar { display: none }`}</style>
               <TerminalWidgets
                 onSelectSymbol={onSelect}
                 watchlist={watchlist}
