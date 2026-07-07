@@ -8,6 +8,7 @@ import type { EnrichedPosition, Position, Transaction } from "@/types";
 import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
 import { PositionDetail } from "@/components/PositionDetail";
+import { TerminalView } from "@/components/TerminalView";
 import { AddSheet } from "@/components/AddSheet";
 import { HelpSheet } from "@/components/HelpSheet";
 import { WatchList } from "@/components/WatchList";
@@ -20,7 +21,7 @@ import { btnIcon, theme } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
-type Tab = "portfolio";
+type Tab = "portfolio" | "terminal";
 
 const SORT_LABELS: Record<SortKey, string> = {
   value: "Value",
@@ -233,12 +234,161 @@ export default function App() {
     );
   }
 
+  // Terminal View - Full Width
+  if (activeTab === "terminal") {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+        <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
+        {/* Desktop header with tabs */}
+        <div className="desktop-header">
+          <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); align-items: center; justify-content: space-between; } }`}</style>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                onClick={() => setActiveTab("portfolio")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--card-border)",
+                  background: "transparent",
+                  color: "var(--text-dim)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: theme.mono,
+                  cursor: "pointer",
+                }}
+              >
+                Portfolio
+              </button>
+              <button
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--card-border)",
+                  background: "var(--lime-dim)",
+                  color: "var(--lime)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: theme.mono,
+                  cursor: "pointer",
+                }}
+              >
+                Terminal
+              </button>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {isConnected && (
+              <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+                {accountId}
+              </span>
+            )}
+            <button
+              onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            >
+              + Add
+            </button>
+          </div>
+        </div>
+        <TerminalView
+          positions={enriched}
+          onSelect={(symbol) => openDetail(symbol)}
+        />
+        <TabBar
+          active={activeTab}
+          onChange={handleTabChange}
+          onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
+          onWatch={() => setShowWatch(true)}
+        />
+        {showAdd && (
+          <AddSheet
+            onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
+            onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+            preselect={preselectSymbol}
+          />
+        )}
+        {showWatch && (
+          <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); }} />
+        )}
+        {chartPreview && (
+          <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
+        )}
+      </div>
+    );
+  }
+
+  // Portfolio View
   return (
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px var(--app-hpad, 16px) calc(40px + env(safe-area-inset-bottom, 0px))" }} className="app-content">
+    <div style={{ minHeight: "100vh" }} className="portfolio-view">
+      <style>{`
+        .portfolio-view { padding: 20px var(--app-hpad, 16px) calc(60px + env(safe-area-inset-bottom, 0px)); }
+        @media (max-width: 767px) { .portfolio-view { padding: 20px 12px calc(60px + env(safe-area-inset-bottom, 0px)); } }
+        @media (min-width: 768px) { 
+          .portfolio-content { max-width: 800px; margin: 0 auto; }
+        }
+      `}</style>
 
+      {/* Desktop header with tabs */}
+      <div className="desktop-header">
+        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 1px solid var(--card-border); padding: 12px 16px; align-items: center; justify-content: space-between; } }`}</style>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              onClick={() => setActiveTab("portfolio")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "var(--lime-dim)",
+                color: "var(--lime)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
+            >
+              Portfolio
+            </button>
+            <button
+              onClick={() => setActiveTab("terminal")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "transparent",
+                color: "var(--text-dim)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
+            >
+              Terminal
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {isConnected && (
+            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+              {accountId}
+            </span>
+          )}
+          <button
+            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+          >
+            + Add
+          </button>
+        </div>
+      </div>
 
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+      <div className="portfolio-content">
+      {/* Header - mobile only */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }} className="mobile-header">
+        <style>{`.mobile-header { } @media (min-width: 768px) { .mobile-header { display: none; } }`}</style>
         <div>
           <h1 style={{ fontSize: "22px", fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
           <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "2px" }}>
@@ -382,6 +532,7 @@ export default function App() {
         onAdd={() => { setPreselectSymbol(null); setShowAdd(true); }}
         onWatch={() => setShowWatch(true)}
       />
+      </div>
     </div>
   );
 }

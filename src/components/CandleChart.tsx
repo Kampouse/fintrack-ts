@@ -291,6 +291,123 @@ function computeZScore(bars: Bar[], period = 20): Map<number, number> {
   return z;
 }
 
+// ── Buy the Dip / Sell the Rip signals ──────────────────────────────────────
+function computeBtSrSignals(
+  bars: Bar[],
+  rsiLen = 14,
+  rsiOB = 70,
+  rsiOS = 30,
+  volLen = 20,
+): { dips: number[]; rips: number[] } {
+  const rsi = computeRSI(bars, rsiLen);
+  const dips: number[] = [];
+  const rips: number[] = [];
+
+  // Volume SMA
+  const volSma = new Map<number, number>();
+  if (bars.length >= volLen) {
+    let sum = 0;
+    for (let i = 0; i < bars.length; i++) {
+      sum += bars[i].volume;
+      if (i >= volLen - 1) {
+        volSma.set(i, sum / volLen);
+        sum -= bars[i - volLen + 1].volume;
+      }
+    }
+  }
+
+  for (let i = rsiLen + 1; i < bars.length; i++) {
+    const r = rsi.get(i);
+    const vma = volSma.get(i);
+    if (r == null || vma == null) continue;
+
+    const priceUp = bars[i].close > bars[i - 1].close;
+    const priceDown = bars[i].close < bars[i - 1].close;
+    const volConfirm = bars[i].volume > vma;
+
+    if (r < rsiOS && priceUp && volConfirm) dips.push(i);
+    if (r > rsiOB && priceDown && volConfirm) rips.push(i);
+  }
+  return { dips, rips };
+}
+
+function drawBtSrSignals(
+  ctx: CanvasRenderingContext2D,
+  s: DrawState,
+  bars: Bar[],
+) {
+  const { padLeft, barWidth, priceToY, viewStart: vs, viewEnd: ve } = s;
+  const signals = computeBtSrSignals(bars);
+  const triSize = Math.max(4, Math.min(7, barWidth * 0.35));
+
+  // Dip signals — green up-triangles below bar lows
+  for (const idx of signals.dips) {
+    if (idx < vs || idx >= ve) continue;
+    const bar = bars[idx];
+    const x = padLeft + (idx - vs + 0.5) * barWidth;
+    const y = priceToY(bar.low) + triSize + 5;
+
+    // Glow halo
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "#22c55e";
+    ctx.beginPath();
+    ctx.arc(x, y, triSize + 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Triangle pointing up
+    ctx.fillStyle = "#22c55e";
+    ctx.beginPath();
+    ctx.moveTo(x, y - triSize);
+    ctx.lineTo(x - triSize, y + triSize);
+    ctx.lineTo(x + triSize, y + triSize);
+    ctx.closePath();
+    ctx.fill();
+
+    if (barWidth > 18) {
+      ctx.font = "700 8px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillStyle = "#22c55e";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText("DIP", x, y + triSize + 2);
+    }
+  }
+
+  // Rip signals — red down-triangles above bar highs
+  for (const idx of signals.rips) {
+    if (idx < vs || idx >= ve) continue;
+    const bar = bars[idx];
+    const x = padLeft + (idx - vs + 0.5) * barWidth;
+    const y = priceToY(bar.high) - triSize - 5;
+
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.arc(x, y, triSize + 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Triangle pointing down
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.moveTo(x, y + triSize);
+    ctx.lineTo(x - triSize, y - triSize);
+    ctx.lineTo(x + triSize, y - triSize);
+    ctx.closePath();
+    ctx.fill();
+
+    if (barWidth > 18) {
+      ctx.font = "700 8px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillStyle = "#ef4444";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("RIP", x, y - triSize - 2);
+    }
+  }
+}
+
 function buildDrawState(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -715,6 +832,7 @@ function drawChart(
   vpData?: VPRow[],
   obData?: OrderbookSnapshot | null,
   logScale?: boolean,
+  showSignals?: boolean,
 ) {
   const s = buildDrawState(ctx, w, h, bars, subDaily, viewStart, viewEnd, priceOverride, logScale);
   const { padLeft, padRight, padTop, padBottom, chartW, chartH, volH,
@@ -874,6 +992,11 @@ function drawChart(
     }
   }
 
+  // Buy the Dip / Sell the Rip signals
+  if (showSignals) {
+    drawBtSrSignals(ctx, s, bars);
+  }
+
   // Current price line
   const lastBar = visibleBars[visibleBars.length - 1];
   const lastY = priceToY(lastBar.close);
@@ -989,13 +1112,14 @@ function drawChart(
     });
   }
 
-  // Price labels (right axis)
+  // Price labels (right axis) - skip some for small charts
   ctx.fillStyle = "rgba(255,255,255,0.5)";
   ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  for (let i = 0; i <= 3; i++) {
-    const p = lo + (totalRange / 3) * i;
+  const numPriceLabels = chartH < 100 ? 2 : chartH < 150 ? 3 : 4;
+  for (let i = 0; i <= numPriceLabels; i++) {
+    const p = lo + (totalRange / numPriceLabels) * i;
     const y = priceToY(p);
     const label = fmtPrice(p);
     ctx.fillStyle = "rgba(255,255,255,0.5)";
@@ -1376,6 +1500,7 @@ export function CandleChart({
   const [logScale, setLogScale] = useState(false);
   const [magnet, setMagnet] = useState(false);
   const [candleType, setCandleType] = useState<"candle" | "heikin">("candle");
+  const [showSignals, setShowSignals] = useState(false);
   const [drawTool, setDrawTool] = useState<"line" | "fib">("line");
   const [trades, setTrades] = useState<Trade[]>([]);
   const nextIdRef = useRef(1);
@@ -1554,7 +1679,17 @@ export function CandleChart({
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     const w = rect.width;
-    const h = rect.height;
+    let h = rect.height;
+    
+    // If no explicit height and container has 0 height, check parent
+    if (h < 10 && height === undefined) {
+      const parent = canvas.parentElement;
+      if (parent) {
+        const parentRect = parent.getBoundingClientRect();
+        h = parentRect.height > 10 ? parentRect.height : h;
+      }
+    }
+    
     if (w < 10 || h < 10) {
       requestAnimationFrame(() => render(bars, subDaily, crossX));
       return;
@@ -1571,7 +1706,7 @@ export function CandleChart({
 
     const tls = dragTrendlinesRef.current ?? activeTrendlines;
     const drawBars = candleType === "heikin" ? toHeikinAshi(bars) : bars;
-    drawChart(ctx, w, h, drawBars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current, undefined, logScale);
+    drawChart(ctx, w, h, drawBars, subDaily, vs, ve, crossX ?? crossXRef.current, priceLevels, tls, null, selectedTlId, priceZoomRef.current, vpDataRef.current, undefined, logScale, showSignals);
 
     // Two-finger measurement overlay
     if (measureRef.current) {
@@ -1594,7 +1729,7 @@ export function CandleChart({
       }
     }
 
-  }, [priceLevels, activeTrendlines, selectedTlId, indicator, candleType, logScale]);
+  }, [priceLevels, activeTrendlines, selectedTlId, indicator, candleType, logScale, showSignals]);
 
   // Keep a ref to latest render so the fetch effect doesn't re-fire on trendline changes
   const renderRef = useRef(render);
@@ -1659,7 +1794,17 @@ export function CandleChart({
       });
     });
     if (canvasRef.current) observer.observe(canvasRef.current);
-    return () => { observer.disconnect(); cancelAnimationFrame(raf); };
+    
+    // Also handle window resize
+    const handleResize = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (barsRef.current.length) render(barsRef.current, days <= 1);
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    
+    return () => { observer.disconnect(); window.removeEventListener('resize', handleResize); cancelAnimationFrame(raf); };
   }, [canChart, days, render]);
 
   // Volume Profile fetch (crypto only)
@@ -2123,7 +2268,7 @@ export function CandleChart({
   if (!canChart) return null;
 
   return (
-    <div style={{ marginBottom: "16px" }}>
+    <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", height: height ? undefined : "100%", position: height ? undefined : "absolute", inset: height ? undefined : 0 }}>
       {/* Row 1: timeframes + indicators */}
       <div style={{ display: "flex", gap: "4px", marginBottom: "4px", alignItems: "center", minHeight: 26, overflowX: "auto", scrollbarWidth: "none" }}
         onPointerDown={e => e.stopPropagation()}
@@ -2217,6 +2362,11 @@ export function CandleChart({
           onClick={() => setCandleType(c => c === "candle" ? "heikin" : "candle")}
           style={toolBtn(candleType === "heikin", "rgba(251,191,36,0.12)", "rgba(251,191,36,0.8)")}
         >HA</button>
+        <div style={{ width: 1, height: 16, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
+        <button
+          onClick={() => setShowSignals(s => !s)}
+          style={toolBtn(showSignals, "rgba(34,197,94,0.15)", "rgba(34,197,94,0.9)")}
+        >BtSr</button>
       </div>
       <div
         style={{
@@ -2224,7 +2374,9 @@ export function CandleChart({
           overflow: "hidden",
           background: "rgba(255,255,255,0.02)",
           position: "relative",
-          height,
+          height: height ?? "100%",
+          flex: height ? undefined : 1,
+          minHeight: height ? undefined : 100,
           touchAction: "none",
           userSelect: "none",
           WebkitUserSelect: "none",

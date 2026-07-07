@@ -1,6 +1,6 @@
-import { TrendingUp, Wallet, Plus } from "lucide-react";
+import { TrendingUp, Wallet, Plus, LayoutGrid } from "lucide-react";
 
-type Tab = "portfolio";
+type Tab = "portfolio" | "terminal";
 
 interface Props {
   active: Tab;
@@ -13,19 +13,6 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
   return (
     <div>
       <style>{`
-        .desktop-bar {
-          display: none;
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 44px;
-          z-index: 200;
-          background: #0a0a0a;
-          border-bottom: 1px solid var(--card-border);
-          align-items: center;
-          padding-left: 12px;
-        }
         .mobile-nav {
           display: none;
         }
@@ -34,9 +21,6 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
         }
         .fab-btn:active {
           transform: scale(0.9);
-        }
-        @media (min-width: 768px) {
-          .desktop-bar { display: flex; }
         }
         @media (max-width: 767px) {
           .mobile-nav {
@@ -58,24 +42,7 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
         }
       `}</style>
 
-      {/* Desktop top bar */}
-      <div className="desktop-bar">
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--lime)", marginRight: 8 }}>F</span>
-        <button
-          onClick={() => onChange("portfolio")}
-          style={{
-            display: "flex", alignItems: "center", gap: 5,
-            background: "var(--lime-dim)", border: "none", cursor: "pointer",
-            padding: "6px 10px", borderRadius: 6,
-            color: "var(--lime)", transition: "color 0.15s ease, background 0.15s ease",
-          }}
-        >
-          <TrendingUp size={14} />
-          <span style={{ fontSize: "11px", fontWeight: 600 }}>Portfolio</span>
-        </button>
-      </div>
-
-      {/* Mobile bottom nav */}
+      {/* Bottom navigation - mobile & desktop */}
       <div className="mobile-nav">
         <button
           onClick={() => onChange("portfolio")}
@@ -90,6 +57,21 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
           }}
         >
           <Wallet size={22} />
+        </button>
+
+        <button
+          onClick={() => onChange("terminal")}
+          aria-label="Terminal"
+          style={{
+            flex: 1,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            background: "none", border: "none", cursor: "pointer",
+            color: active === "terminal" ? "var(--lime)" : "var(--text-dim)",
+            paddingBottom: 4,
+            transition: "color 0.15s ease",
+          }}
+        >
+          <LayoutGrid size={22} />
         </button>
 
         <div style={{ flex: 1, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
