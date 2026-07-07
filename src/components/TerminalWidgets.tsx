@@ -297,21 +297,42 @@ function TickerRow({
         {isWatched && <Star size={10} fill="var(--lime)" color="var(--lime)" />}
         <span style={{ fontWeight: 500, fontSize: 11 }}>{ticker.baseAsset}</span>
       </div>
-      <div style={{ textAlign: "right" }}>
-        <div style={{ fontFamily: MONO, fontSize: 10 }}>
-          ${fmtPrice(ticker.price)}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: MONO, fontSize: 10 }}>
+            ${fmtPrice(ticker.price)}
+          </div>
+          <div
+            style={{
+              fontFamily: MONO,
+              fontSize: 9,
+              color: ticker.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
+            }}
+          >
+            {ticker.changePercent >= 0 ? "+" : ""}
+            {ticker.changePercent.toFixed(1)}%
+            {showVolume && ` • ${fmtVol(ticker.quoteVolume)}`}
+          </div>
         </div>
-        <div
-          style={{
-            fontFamily: MONO,
-            fontSize: 9,
-            color: ticker.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
-          }}
-        >
-          {ticker.changePercent >= 0 ? "+" : ""}
-          {ticker.changePercent.toFixed(1)}%
-          {showVolume && ` • ${fmtVol(ticker.quoteVolume)}`}
-        </div>
+        {isWatched && hovered && onRemove && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              padding: 2,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
