@@ -4,6 +4,7 @@ import type { EnrichedPosition } from "@/types";
 import { CandleChart } from "./CandleChart";
 import { TerminalWidgets } from "./TerminalWidgets";
 import { MarketHeatmap } from "./MarketHeatmap";
+import { ChartModal } from "./ChartModal";
 import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty } from "@/lib/format";
 import { theme } from "@/lib/styles";
 
@@ -32,6 +33,7 @@ export function TerminalView({ positions, onSelect }: Props) {
   const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
   const [showWidgets, setShowWidgets] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [modalSymbol, setModalSymbol] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>(() => {
     const saved = localStorage.getItem("terminal-watchlist");
     return saved ? JSON.parse(saved) : [];
@@ -449,7 +451,7 @@ export function TerminalView({ positions, onSelect }: Props) {
             >
               <style>{`.terminal-sidebar::-webkit-scrollbar { display: none }`}</style>
               <TerminalWidgets
-                onSelectSymbol={onSelect}
+                onSelectSymbol={(symbol) => setModalSymbol(symbol)}
                 watchlist={watchlist}
                 onToggleWatchlist={toggleWatchlist}
               />
@@ -483,7 +485,7 @@ export function TerminalView({ positions, onSelect }: Props) {
           })}
           {viewMode === "market" && (
             <MarketHeatmap
-              onSelectSymbol={onSelect}
+              onSelectSymbol={(symbol) => setModalSymbol(symbol)}
               watchlist={watchlist}
               onToggleWatchlist={toggleWatchlist}
             />
@@ -496,6 +498,8 @@ export function TerminalView({ positions, onSelect }: Props) {
           No positions found
         </div>
       )}
+
+      <ChartModal symbol={modalSymbol} onClose={() => setModalSymbol(null)} />
     </div>
   );
 }
