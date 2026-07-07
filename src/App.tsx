@@ -59,7 +59,12 @@ export default function App() {
   }, [showSortDD]);
 
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
-  const symbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
+  const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
+  const symbols = useMemo(() => {
+    const all = new Set(positionSymbols);
+    if (detailSymbol) all.add(detailSymbol);
+    return [...all];
+  }, [positionSymbols, detailSymbol]);
 
   // Live quotes via server-side proxy (key never reaches client)
   const { quotes, /* refreshQuotes */ } = useQuotes(symbols);
