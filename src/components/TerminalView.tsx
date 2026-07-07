@@ -87,48 +87,19 @@ export function TerminalView({ positions, onSelect }: Props) {
     return [...positions].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   }, [positions]);
 
-  // Initialize panel positions in a grid
-  useEffect(() => {
+  // Calculate panel grid based on screen size
+  const calculateGrid = useCallback(() => {
     if (sorted.length === 0) return;
 
-    const saved = localStorage.getItem("terminal-panels");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const existingPositions = sorted.filter(pos => parsed[pos.symbol]);
-        if (existingPositions.length === sorted.length) {
-          setPanels(parsed);
-          return;
-        }
-        const savedPanels = parsed as Record<string, PanelState>;
-        const newPanels: Record<string, PanelState> = { ...savedPanels };
-        const newPositions = sorted.filter(pos => !savedPanels[pos.symbol]);
-        if (newPositions.length > 0) {
-          const containerWidth = containerRef.current?.clientWidth || window.innerWidth || 375;
-          const cols = Math.max(1, Math.floor(containerWidth / 200));
-          const cardWidth = (containerWidth - 16) / cols;
-          const cardHeight = 250;
-          const maxY = Math.max(...Object.values(savedPanels).map(p => p.y + p.height), 0);
-          
-          newPositions.forEach((pos, i) => {
-            const col = i % cols;
-            newPanels[pos.symbol] = {
-              x: 8 + col * (cardWidth + 8),
-              y: maxY + 20 + Math.floor(i / cols) * (cardHeight + 8),
-              width: cardWidth - 8,
-              height: cardHeight,
-            };
-          });
-          setPanels(newPanels);
-          return;
-        }
-      } catch {}
-    }
-
-    const containerWidth = containerRef.current?.clientWidth || window.innerWidth || 375;
-    const cols = Math.max(1, Math.floor(containerWidth / 200));
-    const cardWidth = (containerWidth - 16) / cols;
-    const cardHeight = 250;
+    const containerWidth = containerRef.current?.clientWidth || window.innerWidth - 240; // Account for sidebar
+    const containerHeight = window.innerHeight - 100; // Account for header and padding
+    
+    // Calculate columns based on container width (min card width 280px)
+    const cols = Math.max(1, Math.floor(containerWidth / 280));
+    const rows = Math.ceil(sorted.length / cols);
+    
+    const cardWidth = (containerWidth - 16 - (cols - 1) * 8) / cols;
+    const cardHeight = Math.max(200, (containerHeight - 16 - (rows - 1) * 8) / rows);
 
     const newPanels: Record<string, PanelState> = {};
     sorted.forEach((pos, i) => {
@@ -136,8 +107,8 @@ export function TerminalView({ positions, onSelect }: Props) {
       const row = Math.floor(i / cols);
       newPanels[pos.symbol] = {
         x: 8 + col * (cardWidth + 8),
-        y: 60 + row * (cardHeight + 8),
-        width: cardWidth - 8,
+        y: 8 + row * (cardHeight + 8),
+        width: cardWidth,
         height: cardHeight,
       };
     });
@@ -145,12 +116,36 @@ export function TerminalView({ positions, onSelect }: Props) {
     setPanels(newPanels);
   }, [sorted]);
 
-  // Calculate canvas height
-  const canvasHeight = useMemo(() => {
-    if (Object.keys(panels).length === 0) return sorted.length * 260 + 100;
-    const maxBottom = Math.max(...Object.values(panels).map(p => p.y + p.height));
-    return Math.max(maxBottom + 100, window.innerHeight);
-  }, [panels, sorted.length]);
+  // Initialize panels on mount and resize
+  useEffect(() => {
+    // Check for saved positions first
+    const saved = localStorage.getItem("terminal-panels");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const hasAllPositions = sorted.every(pos => parsed[pos.symbol]);
+        if (hasAllPositions) {
+          setPanels(parsed);
+          return;
+        }
+      } catch {}
+    }
+    
+    calculateGrid();
+  }, [sorted, calculateGrid]);
+
+  // Recalculate on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      // Only recalculate if no saved positions
+      if (!localStorage.getItem("terminal-panels")) {
+        calculateGrid();
+      }
+    };
+    
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [calculateGrid]);
 
   // Save panels
   useEffect(() => {
@@ -278,16 +273,16 @@ export function TerminalView({ positions, onSelect }: Props) {
   // Reset layout
   const resetLayout = useCallback(() => {
     localStorage.removeItem("terminal-panels");
-    setPanels({});
-  }, []);
+    calculateGrid();
+  }, [calculateGrid]);
 
   return (
     <div 
       ref={containerRef} 
       style={{ 
-        position: "relative", 
-        minHeight: canvasHeight,
-        paddingBottom: 200,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
       className="terminal-view"
     >
@@ -412,7 +407,7 @@ export function TerminalView({ positions, onSelect }: Props) {
       </div>
 
       {/* Content */}
-      <div style={{ display: "flex", height: "calc(100vh - 44px)" }}>
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Widgets sidebar */}
         {showWidgets && viewMode === "positions" && (
           <>
@@ -457,7 +452,6 @@ export function TerminalView({ positions, onSelect }: Props) {
           style={{ 
             flex: 1, 
             position: "relative", 
-            minHeight: canvasHeight,
             overflow: "auto",
           }}
         >
@@ -532,26 +526,43 @@ function TerminalCard({
         onMouseDown={onDragStart}
         onTouchStart={onDragStart}
         style={{
-          padding: "8px 12px",
-          borderBottom: "1px solid var(--card-border)",
+          padding: "6px 10px",
           cursor: "grab",
+          borderBottom: "1px solid var(--card-border)",
           display: "flex",
-          alignItems: "center",
           justifyContent: "space-between",
-          gap: 8,
-          background: "var(--bg)",
+          alignItems: "center",
+          background: "var(--card)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{position.symbol}</span>
-          <Move size={14} style={{ opacity: 0.3 }} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {isUp !== null && (isUp ? <TrendingUp size={12} color={pnlColor} /> : <TrendingDown size={12} color={pnlColor} />)}
-          <span style={{ fontSize: 12, fontFamily: theme.mono, fontWeight: 600, color: pnlColor }}>
-            {position.pnlPct != null ? fmtPct(position.pnlPct) : "--"}
+          <span style={{ fontWeight: 600, fontSize: 13 }}>{position.symbol}</span>
+          <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: theme.mono }}>
+            {position.qty != null ? fmtQty(position.qty) : "--"}
           </span>
         </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: theme.mono, fontSize: 11 }}>
+            {position.value != null ? fmtUsd(position.value, 0) : "--"}
+          </div>
+          <div style={{ fontFamily: theme.mono, fontSize: 10, color: pnlColor }}>
+            {position.pnl != null ? `${position.pnl >= 0 ? "+" : ""}${fmtUsd(position.pnl, 0)}` : "--"}
+          </div>
+        </div>
+      </div>
+
+      {/* P&L bar */}
+      <div style={{ height: 4, background: "var(--card-border)" }}>
+        {position.value != null && position.pnl != null && (
+          <div
+            style={{
+              width: `${Math.min(100, Math.abs(position.pnl) / position.value * 100)}%`,
+              height: "100%",
+              background: pnlColor,
+              marginLeft: position.pnl >= 0 ? "auto" : 0,
+            }}
+          />
+        )}
       </div>
 
       {/* Chart */}
@@ -566,17 +577,19 @@ function TerminalCard({
       {/* Footer */}
       <div
         style={{
+          padding: "4px 10px",
+          borderTop: "1px solid var(--card-border)",
           display: "flex",
           justifyContent: "space-between",
-          padding: "8px 12px",
-          borderTop: "1px solid var(--card-border)",
-          fontSize: 10,
-          fontFamily: theme.mono,
-          color: "var(--text-dim)",
+          alignItems: "center",
         }}
       >
-        <span>{position.price != null ? fmtUsdPrice(position.price) : "--"}</span>
-        <span>{position.value != null ? fmtUsd(position.value, 0) : "--"}</span>
+        <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
+          {isUp != null ? (isUp ? "▲" : "▼") : "—"} {position.changePct != null ? fmtPct(position.changePct) : "--"}
+        </span>
+        <span style={{ fontSize: 10, color: "var(--text-dim)" }}>
+          {position.price != null ? fmtUsdPrice(position.price) : "--"}
+        </span>
       </div>
 
       {/* Resize handles */}
