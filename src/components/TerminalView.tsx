@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, Sid
 import type { EnrichedPosition } from "@/types";
 import { CandleChart } from "./CandleChart";
 import { TerminalWidgets } from "./TerminalWidgets";
+import { MarketHeatmap } from "./MarketHeatmap";
 import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty } from "@/lib/format";
 import { theme } from "@/lib/styles";
 
@@ -455,7 +456,7 @@ export function TerminalView({ positions, onSelect }: Props) {
             overflow: "auto",
           }}
         >
-          {sorted.map((pos) => {
+          {viewMode === "positions" && sorted.map((pos) => {
             const panel = panels[pos.symbol];
             if (!panel) return null;
 
@@ -471,6 +472,13 @@ export function TerminalView({ positions, onSelect }: Props) {
               />
             );
           })}
+          {viewMode === "market" && (
+            <MarketHeatmap
+              onSelectSymbol={onSelect}
+              watchlist={watchlist}
+              onToggleWatchlist={toggleWatchlist}
+            />
+          )}
         </div>
       </div>
 

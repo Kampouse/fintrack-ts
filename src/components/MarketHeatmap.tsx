@@ -87,7 +87,7 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
   }
 
   return (
-    <div style={{ padding: "8px 12px" }}>
+    <div style={{ padding: "8px 12px", height: "100%", overflow: "auto" }}>
       {/* Tab Bar */}
       <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
         {(["heatmap", "gainers", "losers", "volume"] as const).map((v) => (
@@ -203,7 +203,7 @@ function HeatmapGrid({
   };
 
   return (
-    <div style={{ padding: "8px 12px" }}>
+    <div style={{ padding: "8px 12px", height: "100%", overflow: "auto" }}>
       {/* Legend */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
