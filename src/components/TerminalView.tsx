@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, SidebarClose } from "lucide-react";
+import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, SidebarClose, Search } from "lucide-react";
+import { SearchModal } from "./SearchModal";
 import type { EnrichedPosition } from "@/types";
 import { CandleChart } from "./CandleChart";
 import { TerminalWidgets } from "./TerminalWidgets";
@@ -34,6 +35,7 @@ export function TerminalView({ positions, onSelect }: Props) {
   const [showWidgets, setShowWidgets] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [modalSymbol, setModalSymbol] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(() => {
     const saved = localStorage.getItem("terminal-watchlist");
     return saved ? JSON.parse(saved) : [];
@@ -378,6 +380,28 @@ export function TerminalView({ positions, onSelect }: Props) {
           </div>
         )}
 
+        {/* Search button */}
+        <button
+          onClick={() => setShowSearch(true)}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--card-border)",
+            background: "transparent",
+            color: "var(--text-dim)",
+            fontSize: 11,
+            fontWeight: 500,
+            fontFamily: theme.mono,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <Search size={14} />
+          <span style={{ display: isMobile ? "none" : "inline" }}>Add</span>
+        </button>
+
         {/* Reset button */}
         <button
           onClick={resetLayout}
@@ -391,7 +415,6 @@ export function TerminalView({ positions, onSelect }: Props) {
             fontWeight: 500,
             fontFamily: theme.mono,
             cursor: "pointer",
-            marginLeft: "auto",
           }}
         >
           Reset
@@ -500,6 +523,17 @@ export function TerminalView({ positions, onSelect }: Props) {
       )}
 
       <ChartModal symbol={modalSymbol} onClose={() => setModalSymbol(null)} />
+      
+      {showSearch && (
+        <SearchModal
+          onClose={() => setShowSearch(false)}
+          onAdd={(symbol) => {
+            toggleWatchlist(symbol);
+            setShowSearch(false);
+          }}
+          watchlist={watchlist}
+        />
+      )}
     </div>
   );
 }
