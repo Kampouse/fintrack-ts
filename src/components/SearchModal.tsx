@@ -47,10 +47,9 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
         inset: 0,
         background: "rgba(0,0,0,0.7)",
         display: "flex",
-        alignItems: "center",
+        alignItems: "flex-end",
         justifyContent: "center",
         zIndex: 1000,
-        padding: 20,
       }}
     >
       <div
@@ -58,21 +57,29 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
         style={{
           background: "var(--card)",
           border: "1px solid var(--card-border)",
-          borderRadius: 12,
+          borderRadius: "16px 16px 0 0",
           width: "100%",
-          maxWidth: 400,
-          maxHeight: "80vh",
+          maxWidth: 500,
+          maxHeight: "70vh",
           display: "flex",
           flexDirection: "column",
+          animation: "slideUp 0.2s ease-out",
         }}
       >
+        <style>{`
+          @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+          }
+        `}</style>
+        
         {/* Header */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 12,
-            padding: "12px 16px",
+            padding: "16px",
             borderBottom: "1px solid var(--card-border)",
           }}
         >
@@ -109,13 +116,13 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
         {/* Results */}
         <div style={{ flex: 1, overflow: "auto", padding: "8px 0" }}>
           {loading && (
-            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
               Loading...
             </div>
           )}
 
           {!loading && search.length === 0 && (
-            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
               Type to search for crypto assets
             </div>
           )}
@@ -133,7 +140,7 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
                     onClose();
                   }}
                   style={{
-                    padding: "10px 16px",
+                    padding: "12px 16px",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
@@ -148,16 +155,16 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
                     if (!isWatched) e.currentTarget.style.background = "transparent";
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t.baseAsset}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "monospace" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{t.baseAsset}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "monospace" }}>
                       ${t.price >= 1 ? t.price.toFixed(2) : t.price.toFixed(6)}
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div
                       style={{
-                        fontSize: 11,
+                        fontSize: 12,
                         fontFamily: "monospace",
                         color: t.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
                       }}
@@ -165,7 +172,7 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
                       {t.changePercent >= 0 ? "+" : ""}{t.changePercent.toFixed(1)}%
                     </div>
                     {isWatched && (
-                      <span style={{ fontSize: 10, color: "var(--lime)" }}>✓</span>
+                      <span style={{ fontSize: 11, color: "var(--lime)" }}>✓ added</span>
                     )}
                   </div>
                 </div>
@@ -174,8 +181,8 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
           )}
 
           {!loading && search.length > 0 && results.length === 0 && (
-            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No results found for "{search}"
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
+              No results for "{search}"
             </div>
           )}
         </div>
