@@ -596,7 +596,9 @@ function TerminalRoute() {
           positions={enriched}
           onSelect={(symbol) => navigate(`/position/${encodeURIComponent(symbol)}`)}
           viewMode={viewMode}
+          onViewModeChange={setViewMode}
           timeframe={timeframe}
+          onTimeframeChange={setTimeframe}
           watchlist={watchlist}
           onToggleWatchlist={toggleWatchlist}
         />

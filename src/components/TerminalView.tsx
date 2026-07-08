@@ -13,11 +13,11 @@ interface Props {
   positions: EnrichedPosition[];
   onSelect: (symbol: string) => void;
   viewMode?: "positions" | "market";
+  onViewModeChange?: (mode: "positions" | "market") => void;
   timeframe?: number;
+  onTimeframeChange?: (index: number) => void;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string) => void;
-  showSearch?: boolean;
-  onCloseSearch?: () => void;
 }
 
 const TF_OPTIONS = [
@@ -35,7 +35,7 @@ interface PanelState {
   height: number;
 }
 
-export function TerminalView({ positions, onSelect, viewMode: externalViewMode, timeframe: externalTimeframe, watchlist: externalWatchlist, onToggleWatchlist }: Props) {
+export function TerminalView({ positions, onSelect, viewMode: externalViewMode, onViewModeChange, timeframe: externalTimeframe, onTimeframeChange, watchlist: externalWatchlist, onToggleWatchlist }: Props) {
   const [timeframe, setTimeframe] = useState(1);
   const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
   const [showWidgets, setShowWidgets] = useState(true);
@@ -325,7 +325,7 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
         {/* View Mode Toggle */}
         <div style={{ display: "flex", gap: 4 }}>
           <button
-            onClick={() => setViewMode("positions")}
+            onClick={() => onViewModeChange ? onViewModeChange("positions") : setViewMode("positions")}
             style={{
               padding: "6px 10px",
               borderRadius: 6,
@@ -345,7 +345,7 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
             Positions
           </button>
           <button
-            onClick={() => setViewMode("market")}
+            onClick={() => onViewModeChange ? onViewModeChange("market") : setViewMode("market")}
             style={{
               padding: "6px 10px",
               borderRadius: 6,
@@ -372,7 +372,7 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
             {TF_OPTIONS.map((tf, i) => (
               <button
                 key={tf.label}
-                onClick={() => setTimeframe(i)}
+                onClick={() => onTimeframeChange ? onTimeframeChange(i) : setTimeframe(i)}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 6,
