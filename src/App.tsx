@@ -578,34 +578,13 @@ function TerminalRoute() {
           )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Search button */}
-          <button
-            onClick={() => setShowSearch(true)}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--card-border)",
-              background: "transparent",
-              color: "var(--text-dim)",
-              fontSize: 11,
-              fontWeight: 500,
-              fontFamily: theme.mono,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <Search size={14} />
-            Add
-          </button>
           {isConnected && (
             <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
               {accountId}
             </span>
           )}
           <button
-            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+            onClick={() => setShowSearch(true)}
             style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
           >
             + Add
