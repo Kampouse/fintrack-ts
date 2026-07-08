@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Search } from "lucide-react";
 import { getMarketTickers, type MarketTicker } from "@/api/binance";
+import { searchSymbols, type SearchResult } from "@/api/finnhub";
 
 interface Props {
   onClose: () => void;
@@ -8,13 +9,31 @@ interface Props {
   watchlist: string[];
 }
 
+interface CryptoResult {
+  type: "crypto";
+  symbol: string;
+  name: string;
+  price: number;
+  changePercent: number;
+}
+
+interface StockResult {
+  type: "stock";
+  symbol: string;
+  name: string;
+  description: string;
+}
+
+type CombinedResult = CryptoResult | StockResult;
+
 export function SearchModal({ onClose, onAdd, watchlist }: Props) {
   const [search, setSearch] = useState("");
-  const [results, setResults] = useState<MarketTicker[]>([]);
+  const [results, setResults] = useState<CombinedResult[]>([]);
   const [allTickers, setAllTickers] = useState<MarketTicker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
 
-  // Load all tickers on mount
+  // Load all crypto tickers on mount
   useEffect(() => {
     getMarketTickers().then((tickers) => {
       setAllTickers(tickers);
@@ -22,21 +41,55 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
     });
   }, []);
 
-  // Filter locally based on search
+  // Search both crypto and stocks
   useEffect(() => {
     if (search.length < 1) {
       setResults([]);
       return;
     }
     
+    setSearching(true);
     const q = search.toLowerCase();
-    const filtered = allTickers
+    
+    // Filter crypto locally
+    const cryptoResults: CryptoResult[] = allTickers
       .filter((t) => 
         t.baseAsset.toLowerCase().includes(q) ||
         t.symbol.toLowerCase().includes(q)
       )
-      .slice(0, 20);
-    setResults(filtered);
+      .slice(0, 10)
+      .map((t) => ({
+        type: "crypto" as const,
+        symbol: t.symbol,
+        name: t.baseAsset,
+        price: t.price,
+        changePercent: t.changePercent,
+      }));
+
+    // Search stocks via Finnhub
+    const timeout = setTimeout(() => {
+      searchSymbols(search)
+        .then((stockResults) => {
+          const stocks: StockResult[] = (stockResults ?? [])
+            .slice(0, 10)
+            .map((r) => ({
+              type: "stock" as const,
+              symbol: r.symbol,
+              name: r.displaySymbol,
+              description: r.description,
+            }));
+          
+          // Combine results: crypto first, then stocks
+          setResults([...cryptoResults, ...stocks]);
+          setSearching(false);
+        })
+        .catch(() => {
+          setResults(cryptoResults);
+          setSearching(false);
+        });
+    }, 300);
+
+    return () => clearTimeout(timeout);
   }, [search, allTickers]);
 
   return (
@@ -80,7 +133,7 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
           <Search size={18} color="var(--text-dim)" />
           <input
             type="text"
-            placeholder="Search crypto..."
+            placeholder="Search crypto or stocks..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             autoFocus
@@ -117,19 +170,19 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
 
           {!loading && search.length === 0 && (
             <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              Type to search for crypto assets
+              Type to search for crypto or stocks
             </div>
           )}
 
           {!loading && results.length > 0 && (
-            results.map((t) => {
-              const isWatched = watchlist.includes(t.symbol);
+            results.map((r) => {
+              const isWatched = watchlist.includes(r.symbol);
               return (
                 <div
-                  key={t.symbol}
+                  key={r.symbol}
                   onClick={() => {
                     if (!isWatched) {
-                      onAdd(t.symbol);
+                      onAdd(r.symbol);
                     }
                     onClose();
                   }}
@@ -150,21 +203,37 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{t.baseAsset}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "monospace" }}>
-                      ${t.price >= 1 ? t.price.toFixed(2) : t.price.toFixed(6)}
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>
+                      {r.name}
+                      {r.type === "stock" && (
+                        <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: 6, fontWeight: 400 }}>
+                          ({r.symbol})
+                        </span>
+                      )}
                     </div>
+                    {r.type === "crypto" && (
+                      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "monospace" }}>
+                        ${r.price >= 1 ? r.price.toFixed(2) : r.price.toFixed(6)}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontFamily: "monospace",
-                        color: t.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
-                      }}
-                    >
-                      {t.changePercent >= 0 ? "+" : ""}{t.changePercent.toFixed(1)}%
-                    </div>
+                    {r.type === "crypto" && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontFamily: "monospace",
+                          color: r.changePercent >= 0 ? "var(--gain)" : "var(--loss)",
+                        }}
+                      >
+                        {r.changePercent >= 0 ? "+" : ""}{r.changePercent.toFixed(1)}%
+                      </div>
+                    )}
+                    {r.type === "stock" && (
+                      <div style={{ fontSize: 10, color: "var(--lime)", background: "var(--lime-dim)", padding: "2px 6px", borderRadius: 4 }}>
+                        STOCK
+                      </div>
+                    )}
                     {isWatched && (
                       <span style={{ fontSize: 11, color: "var(--lime)" }}>✓ added</span>
                     )}
@@ -174,7 +243,13 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
             })
           )}
 
-          {!loading && search.length > 0 && results.length === 0 && (
+          {!loading && searching && search.length > 0 && (
+            <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
+              Searching stocks...
+            </div>
+          )}
+
+          {!loading && !searching && search.length > 0 && results.length === 0 && (
             <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
               No results for "{search}"
             </div>
