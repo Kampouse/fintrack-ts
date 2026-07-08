@@ -24,6 +24,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Hide all scrollbars globally */
+*::-webkit-scrollbar {
+  display: none;
+}
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 body {
   background: var(--bg);
   min-height: 100vh;
