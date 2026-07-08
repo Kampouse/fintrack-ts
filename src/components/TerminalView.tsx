@@ -501,22 +501,37 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
             overflow: "auto",
           }}
         >
-          {effectiveViewMode === "positions" && sorted.map((pos) => {
-            const panel = panels[pos.symbol];
-            if (!panel) return null;
-
-            return (
-              <TerminalCard
-                key={pos.symbol}
-                position={pos}
-                panel={panel}
-                days={days}
-                isDragging={dragging?.symbol === pos.symbol}
-                onDragStart={(e) => handleDragStart(e, pos.symbol)}
-                onResizeStart={handleResizeStart}
-              />
-            );
-          })}
+          {effectiveViewMode === "positions" && (
+            isMobile ? (
+              /* Mobile: scrollable card list */
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 8 }}>
+                {sorted.map((pos) => (
+                  <MobilePositionCard
+                    key={pos.symbol}
+                    position={pos}
+                    onClick={() => setModalSymbol(pos.symbol)}
+                  />
+                ))}
+              </div>
+            ) : (
+              /* Desktop: draggable canvas panels */
+              sorted.map((pos) => {
+                const panel = panels[pos.symbol];
+                if (!panel) return null;
+                return (
+                  <TerminalCard
+                    key={pos.symbol}
+                    position={pos}
+                    panel={panel}
+                    days={days}
+                    isDragging={dragging?.symbol === pos.symbol}
+                    onDragStart={(e) => handleDragStart(e, pos.symbol)}
+                    onResizeStart={handleResizeStart}
+                  />
+                );
+              })
+            )
+          )}
           {effectiveViewMode === "market" && (
             <MarketHeatmap
               onSelectSymbol={(symbol) => setModalSymbol(symbol)}
@@ -545,6 +560,85 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
           watchlist={watchlist}
         />
       )}
+    </div>
+  );
+}
+
+/* Mobile: compact position card - tap to open chart modal */
+function MobilePositionCard({ position, onClick }: {
+  position: EnrichedPosition;
+  onClick: () => void;
+}) {
+  const pnlColor = position.pnl != null && position.pnl >= 0 ? "var(--green)" : "var(--red)";
+  const isUp = position.changePct != null ? position.changePct >= 0 : null;
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: "var(--card)",
+        borderRadius: 12,
+        border: "1px solid var(--card-border)",
+        overflow: "hidden",
+        cursor: "pointer",
+      }}
+    >
+      {/* Header */}
+      <div style={{
+        padding: "10px 12px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{position.symbol}</span>
+          <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: theme.mono }}>
+            {position.qty != null ? fmtQty(position.qty) : "--"}
+          </span>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: theme.mono, fontSize: 13 }}>
+            {position.value != null ? fmtUsd(position.value, 0) : "--"}
+          </div>
+          <div style={{ fontFamily: theme.mono, fontSize: 11, color: pnlColor }}>
+            {position.pnl != null ? `${position.pnl >= 0 ? "+" : ""}${fmtUsd(position.pnl, 0)}` : "--"}
+          </div>
+        </div>
+      </div>
+
+      {/* P&L bar */}
+      <div style={{ height: 3, background: "var(--card-border)" }}>
+        {position.value != null && position.pnl != null && (
+          <div
+            style={{
+              width: `${Math.min(100, Math.abs(position.pnl) / position.value * 100)}%`,
+              height: "100%",
+              background: pnlColor,
+              marginLeft: position.pnl >= 0 ? "auto" : 0,
+            }}
+          />
+        )}
+      </div>
+
+      {/* Mini chart */}
+      <div style={{ height: 120, background: "rgba(0,0,0,0.15)" }}>
+        <CandleChart symbol={position.symbol} height={120} />
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        padding: "8px 12px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      }}>
+        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          {isUp != null ? (isUp ? "▲" : "▼") : "—"} {position.changePct != null ? fmtPct(position.changePct) : "--"}
+        </span>
+        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          {position.price != null ? fmtUsdPrice(position.price) : "--"}
+        </span>
+      </div>
     </div>
   );
 }
