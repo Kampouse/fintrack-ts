@@ -584,7 +584,7 @@ function TerminalRoute() {
             </span>
           )}
           <button
-            onClick={() => setShowSearch(true)}
+            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
             style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
           >
             + Add
@@ -601,15 +601,6 @@ function TerminalRoute() {
           onToggleWatchlist={toggleWatchlist}
         />
       </div>
-      {showSearch && (
-        <SearchModal
-          onClose={() => setShowSearch(false)}
-          onAdd={(symbol) => {
-            toggleWatchlist(symbol);
-            setShowSearch(false);
-          }}
-        />
-      )}
       <TabBar
         active="terminal"
         onChange={(tab) => { if (tab === "portfolio") navigate("/"); }}
