@@ -3,6 +3,7 @@ import { X, Search } from "lucide-react";
 import type { Quote } from "@/types";
 import { ALL_SYMBOLS, tokenIcon, labelFromSymbol } from "@/lib/constants";
 import { getQuote, searchSymbols, type SearchResult } from "@/api/finnhub";
+import { getMarketTickers, type MarketTicker } from "@/api/binance";
 import { TokenIcon } from "./TokenIcon";
 import { card, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
@@ -20,6 +21,23 @@ const TYPE_LABELS: Record<string, string> = {
   "CRYPTO_DEPOSIT_RECEIPT": "Crypto",
 };
 
+interface CryptoResult {
+  type: "crypto";
+  symbol: string;
+  name: string;
+  price: number;
+  changePercent: number;
+}
+
+interface StockResult {
+  type: "stock";
+  symbol: string;
+  name: string;
+  description: string;
+}
+
+type CombinedResult = CryptoResult | StockResult;
+
 export function AddSheet({ onClose, onSave, preselect }: Props) {
   const [symbol, setSymbol] = useState(preselect || "");
   const [qty, setQty] = useState("");
@@ -31,11 +49,17 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<CombinedResult[]>([]);
   const [searching, setSearching] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [allTickers, setAllTickers] = useState<MarketTicker[]>([]);
 
-  // Debounced symbol search
+  // Load all crypto tickers on mount
+  useEffect(() => {
+    getMarketTickers().then(setAllTickers);
+  }, []);
+
+  // Debounced symbol search (crypto + stocks)
   const runSearch = useCallback((q: string) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (q.trim().length < 1) {
@@ -44,17 +68,43 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
       return;
     }
     setSearching(true);
+    const qlc = q.toLowerCase();
+    
+    // Filter crypto locally
+    const cryptoResults: CryptoResult[] = allTickers
+      .filter((t) => 
+        t.baseAsset.toLowerCase().includes(qlc) ||
+        t.symbol.toLowerCase().includes(qlc)
+      )
+      .slice(0, 10)
+      .map((t) => ({
+        type: "crypto" as const,
+        symbol: t.symbol,
+        name: t.baseAsset,
+        price: t.price,
+        changePercent: t.changePercent,
+      }));
+    
+    // Search stocks via Finnhub
     searchTimer.current = setTimeout(async () => {
       try {
-        const results = await searchSymbols(q.trim());
-        setSearchResults(results);
+        const stockResults = await searchSymbols(q.trim());
+        const stocks: StockResult[] = (stockResults ?? [])
+          .slice(0, 10)
+          .map((r) => ({
+            type: "stock" as const,
+            symbol: r.symbol,
+            name: r.displaySymbol,
+            description: r.description,
+          }));
+        setSearchResults([...cryptoResults, ...stocks]);
       } catch {
-        setSearchResults([]);
+        setSearchResults(cryptoResults);
       } finally {
         setSearching(false);
       }
     }, 300);
-  }, []);
+  }, [allTickers]);
 
   // Auto-fetch live price when symbol changes
   useEffect(() => {
@@ -80,7 +130,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
     setPrice(v);
   };
 
-  const pickSearchResult = (r: SearchResult) => {
+  const pickSearchResult = (r: CombinedResult) => {
     setSymbol(r.symbol);
     setSearchQuery("");
     setSearchResults([]);
@@ -169,11 +219,25 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
                   >
                     <TokenIcon symbol={r.symbol} size={28} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text)" }}>{r.displaySymbol}</div>
-                      <div style={{ fontSize: "12px", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description}</div>
+                      <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text)" }}>
+                        {r.name}
+                        {r.type === "stock" && (
+                          <span style={{ fontSize: "10px", color: "var(--text-dim)", marginLeft: 6, fontWeight: 400 }}>
+                            ({r.symbol})
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {r.type === "stock" ? r.description : r.type === "crypto" ? `$${r.price >= 1 ? r.price.toFixed(2) : r.price.toFixed(6)}` : ""}
+                      </div>
                     </div>
-                    {r.type && TYPE_LABELS[r.type] && (
-                      <span style={{ fontSize: "10px", color: "var(--text-dim)", padding: "2px 6px", borderRadius: "4px", background: "var(--card-border)", flexShrink: 0 }}>{TYPE_LABELS[r.type]}</span>
+                    {r.type === "crypto" && (
+                      <span style={{ fontSize: "10px", color: r.changePercent >= 0 ? "var(--gain)" : "var(--loss)", padding: "2px 6px", borderRadius: "4px", background: r.changePercent >= 0 ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)", flexShrink: 0 }}>
+                        {r.changePercent >= 0 ? "+" : ""}{r.changePercent.toFixed(1)}%
+                      </span>
+                    )}
+                    {r.type === "stock" && (
+                      <span style={{ fontSize: "10px", color: "var(--lime)", padding: "2px 6px", borderRadius: "4px", background: "var(--lime-dim)", flexShrink: 0 }}>STOCK</span>
                     )}
                   </button>
                 ))}
