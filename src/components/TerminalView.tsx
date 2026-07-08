@@ -294,7 +294,6 @@ export function TerminalView({ positions, onSelect }: Props) {
     >
       <style>{`
         .terminal-toolbar { position: sticky; top: 0; z-index: 100; }
-        @media (min-width: 768px) { .terminal-toolbar { top: 44px; } }
         @media (max-width: 767px) { 
           .terminal-content { 
             padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); 

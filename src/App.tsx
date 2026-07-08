@@ -441,57 +441,60 @@ function TerminalRoute() {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
-      {/* Desktop header with tabs */}
+      {/* Desktop header with toolbar integrated */}
       <div className="desktop-header">
-        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); align-items: center; justify-content: space-between; } }`}</style>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-          <div style={{ display: "flex", gap: 4 }}>
+        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; flex-direction: column; padding: 8px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); } }`}</style>
+        <style>{`.header-row { display: flex; align-items: center; justify-content: space-between; } .header-tabs { display: flex; gap: 4; }`}</style>
+        <div className="header-row" style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h1 style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+            <div className="header-tabs">
+              <button
+                onClick={() => navigate("/")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--card-border)",
+                  background: "transparent",
+                  color: "var(--text-dim)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: theme.mono,
+                  cursor: "pointer",
+                }}
+              >
+                Portfolio
+              </button>
+              <button
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--card-border)",
+                  background: "var(--lime-dim)",
+                  color: "var(--lime)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: theme.mono,
+                  cursor: "pointer",
+                }}
+              >
+                Terminal
+              </button>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {isConnected && (
+              <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+                {accountId}
+              </span>
+            )}
             <button
-              onClick={() => navigate("/")}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--card-border)",
-                background: "transparent",
-                color: "var(--text-dim)",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: theme.mono,
-                cursor: "pointer",
-              }}
+              onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
             >
-              Portfolio
-            </button>
-            <button
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--card-border)",
-                background: "var(--lime-dim)",
-                color: "var(--lime)",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: theme.mono,
-                cursor: "pointer",
-              }}
-            >
-              Terminal
+              + Add
             </button>
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {isConnected && (
-            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
-              {accountId}
-            </span>
-          )}
-          <button
-            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
-            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-          >
-            + Add
-          </button>
         </div>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
