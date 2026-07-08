@@ -574,22 +574,24 @@ function MobilePositionCard({ position, onClick }: {
 
   return (
     <div
-      onClick={onClick}
       style={{
         background: "var(--card)",
         borderRadius: 12,
         border: "1px solid var(--card-border)",
         overflow: "hidden",
-        cursor: "pointer",
       }}
     >
-      {/* Header */}
-      <div style={{
-        padding: "10px 12px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-      }}>
+      {/* Header - clickable to open modal */}
+      <div
+        onClick={onClick}
+        style={{
+          padding: "10px 12px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          cursor: "pointer",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{position.symbol}</span>
           <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: theme.mono }}>
