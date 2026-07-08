@@ -47,9 +47,10 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
         inset: 0,
         background: "rgba(0,0,0,0.7)",
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
+        padding: 20,
       }}
     >
       <div
@@ -57,23 +58,15 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
         style={{
           background: "var(--card)",
           border: "1px solid var(--card-border)",
-          borderRadius: "16px 16px 0 0",
+          borderRadius: 12,
           width: "100%",
-          maxWidth: 500,
-          maxHeight: "70vh",
+          maxWidth: 400,
           display: "flex",
           flexDirection: "column",
-          animation: "slideUp 0.2s ease-out",
+          maxHeight: "70vh",
         }}
       >
-        <style>{`
-          @keyframes slideUp {
-            from { transform: translateY(100%); }
-            to { transform: translateY(0); }
-          }
-        `}</style>
-        
-        {/* Header */}
+        {/* Header - fixed at eye level */}
         <div
           style={{
             display: "flex",
@@ -81,6 +74,7 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
             gap: 12,
             padding: "16px",
             borderBottom: "1px solid var(--card-border)",
+            flexShrink: 0,
           }}
         >
           <Search size={18} color="var(--text-dim)" />
@@ -113,8 +107,8 @@ export function SearchModal({ onClose, onAdd, watchlist }: Props) {
           </button>
         </div>
 
-        {/* Results */}
-        <div style={{ flex: 1, overflow: "auto", padding: "8px 0" }}>
+        {/* Results - fixed height, scroll internally */}
+        <div style={{ flex: 1, overflow: "auto", minHeight: 200, maxHeight: 300 }}>
           {loading && (
             <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>
               Loading...
