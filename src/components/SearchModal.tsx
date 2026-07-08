@@ -6,7 +6,7 @@ import { searchSymbols, type SearchResult } from "@/api/finnhub";
 interface Props {
   onClose: () => void;
   onAdd: (symbol: string) => void;
-  watchlist: string[];
+  watchlist?: string[];
 }
 
 interface CryptoResult {
@@ -26,7 +26,7 @@ interface StockResult {
 
 type CombinedResult = CryptoResult | StockResult;
 
-export function SearchModal({ onClose, onAdd, watchlist }: Props) {
+export function SearchModal({ onClose, onAdd, watchlist = [] }: Props) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<CombinedResult[]>([]);
   const [allTickers, setAllTickers] = useState<MarketTicker[]>([]);

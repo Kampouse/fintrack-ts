@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { HashRouter, Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
-import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw, LayoutGrid, BarChart3, Search } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useNearAuth } from "@/contexts/NearAuth";
@@ -18,6 +18,7 @@ import { ChartPreviewSheet } from "@/components/ChartPreviewSheet";
 import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet";
 import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
+import { SearchModal } from "@/components/SearchModal";
 import { btnIcon, theme } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
@@ -391,12 +392,41 @@ function PortfolioView() {
   );
 }
 
+const TF_OPTIONS = [
+  { days: 0, label: "5m" },
+  { days: -1, label: "1m" },
+  { days: 1, label: "1D" },
+  { days: 7, label: "1W" },
+  { days: 30, label: "1M" },
+] as const;
+
 function TerminalRoute() {
   const { txs, addLot } = useTransactions();
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const navigate = useNavigate();
   const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
   const { quotes } = useQuotes(positionSymbols);
+
+  // Terminal toolbar state (lifted from TerminalView)
+  const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
+  const [timeframe, setTimeframe] = useState(1);
+  const [showSearch, setShowSearch] = useState(false);
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    const saved = localStorage.getItem("terminal-watchlist");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Save watchlist
+  useEffect(() => {
+    localStorage.setItem("terminal-watchlist", JSON.stringify(watchlist));
+  }, [watchlist]);
+
+  // Toggle watchlist
+  const toggleWatchlist = useCallback((symbol: string) => {
+    setWatchlist((prev) =>
+      prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol]
+    );
+  }, []);
 
   // Aggregate transactions into positions
   const positions: Position[] = useMemo(() => {
@@ -443,66 +473,164 @@ function TerminalRoute() {
       <style>{`@media(max-width:639px){:root{--app-hpad:12px}}`}</style>
       {/* Desktop header with toolbar integrated */}
       <div className="desktop-header">
-        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; flex-direction: column; padding: 8px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); } }`}</style>
-        <style>{`.header-row { display: flex; align-items: center; justify-content: space-between; } .header-tabs { display: flex; gap: 4; }`}</style>
-        <div className="header-row" style={{ marginBottom: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h1 style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-            <div className="header-tabs">
-              <button
-                onClick={() => navigate("/")}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--card-border)",
-                  background: "transparent",
-                  color: "var(--text-dim)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: theme.mono,
-                  cursor: "pointer",
-                }}
-              >
-                Portfolio
-              </button>
-              <button
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--card-border)",
-                  background: "var(--lime-dim)",
-                  color: "var(--lime)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: theme.mono,
-                  cursor: "pointer",
-                }}
-              >
-                Terminal
-              </button>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {isConnected && (
-              <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
-                {accountId}
-              </span>
-            )}
+        <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; padding: 8px 16px; border-bottom: 1px solid var(--card-border); background: var(--bg); align-items: center; justify-content: space-between; gap: 8; } }`}</style>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+          <div style={{ display: "flex", gap: 4 }}>
             <button
-              onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
-              style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+              onClick={() => navigate("/")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "transparent",
+                color: "var(--text-dim)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
             >
-              + Add
+              Portfolio
+            </button>
+            <button
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: "var(--lime-dim)",
+                color: "var(--lime)",
+                fontSize: 11,
+                fontWeight: 600,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+              }}
+            >
+              Terminal
             </button>
           </div>
+          {/* View mode toggle */}
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              onClick={() => setViewMode("positions")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: viewMode === "positions" ? "var(--lime-dim)" : "transparent",
+                color: viewMode === "positions" ? "var(--lime)" : "var(--text-dim)",
+                fontSize: 11,
+                fontWeight: 500,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <LayoutGrid size={14} />
+              Positions
+            </button>
+            <button
+              onClick={() => setViewMode("market")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--card-border)",
+                background: viewMode === "market" ? "var(--lime-dim)" : "transparent",
+                color: viewMode === "market" ? "var(--lime)" : "var(--text-dim)",
+                fontSize: 11,
+                fontWeight: 500,
+                fontFamily: theme.mono,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <BarChart3 size={14} />
+              Market
+            </button>
+          </div>
+          {/* Timeframe (only in positions mode) */}
+          {viewMode === "positions" && (
+            <div style={{ display: "flex", gap: 4 }}>
+              {TF_OPTIONS.map((tf, i) => (
+                <button
+                  key={tf.label}
+                  onClick={() => setTimeframe(i)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: "1px solid var(--card-border)",
+                    background: timeframe === i ? "var(--lime-dim)" : "transparent",
+                    color: timeframe === i ? "var(--lime)" : "var(--text-dim)",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    fontFamily: theme.mono,
+                    cursor: "pointer",
+                  }}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Search button */}
+          <button
+            onClick={() => setShowSearch(true)}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--card-border)",
+              background: "transparent",
+              color: "var(--text-dim)",
+              fontSize: 11,
+              fontWeight: 500,
+              fontFamily: theme.mono,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <Search size={14} />
+            Add
+          </button>
+          {isConnected && (
+            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+              {accountId}
+            </span>
+          )}
+          <button
+            onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
+            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+          >
+            + Add
+          </button>
         </div>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <TerminalView
           positions={enriched}
           onSelect={(symbol) => navigate(`/position/${encodeURIComponent(symbol)}`)}
+          viewMode={viewMode}
+          timeframe={timeframe}
+          watchlist={watchlist}
+          onToggleWatchlist={toggleWatchlist}
         />
       </div>
+      {showSearch && (
+        <SearchModal
+          onClose={() => setShowSearch(false)}
+          onAdd={(symbol) => {
+            toggleWatchlist(symbol);
+            setShowSearch(false);
+          }}
+        />
+      )}
       <TabBar
         active="terminal"
         onChange={(tab) => { if (tab === "portfolio") navigate("/"); }}

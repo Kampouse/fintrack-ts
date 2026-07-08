@@ -12,6 +12,12 @@ import { theme } from "@/lib/styles";
 interface Props {
   positions: EnrichedPosition[];
   onSelect: (symbol: string) => void;
+  viewMode?: "positions" | "market";
+  timeframe?: number;
+  watchlist?: string[];
+  onToggleWatchlist?: (symbol: string) => void;
+  showSearch?: boolean;
+  onCloseSearch?: () => void;
 }
 
 const TF_OPTIONS = [
@@ -29,7 +35,7 @@ interface PanelState {
   height: number;
 }
 
-export function TerminalView({ positions, onSelect }: Props) {
+export function TerminalView({ positions, onSelect, viewMode: externalViewMode, timeframe: externalTimeframe, watchlist: externalWatchlist, onToggleWatchlist }: Props) {
   const [timeframe, setTimeframe] = useState(1);
   const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
   const [showWidgets, setShowWidgets] = useState(true);
@@ -41,6 +47,11 @@ export function TerminalView({ positions, onSelect }: Props) {
     return saved ? JSON.parse(saved) : [];
   });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Use external props on desktop, internal state on mobile
+  const effectiveViewMode = externalViewMode ?? viewMode;
+  const effectiveTimeframe = externalTimeframe ?? timeframe;
+  const effectiveWatchlist = externalWatchlist ?? watchlist;
 
   // Detect mobile
   useEffect(() => {
@@ -294,6 +305,7 @@ export function TerminalView({ positions, onSelect }: Props) {
     >
       <style>{`
         .terminal-toolbar { position: sticky; top: 0; z-index: 100; }
+        @media (min-width: 768px) { .terminal-toolbar { display: none !important; } }
         @media (max-width: 767px) { 
           .terminal-content { 
             padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); 
@@ -318,8 +330,8 @@ export function TerminalView({ positions, onSelect }: Props) {
               padding: "6px 10px",
               borderRadius: 6,
               border: "1px solid var(--card-border)",
-              background: viewMode === "positions" ? "var(--lime-dim)" : "transparent",
-              color: viewMode === "positions" ? "var(--lime)" : "var(--text-dim)",
+              background: effectiveViewMode === "positions" ? "var(--lime-dim)" : "transparent",
+              color: effectiveViewMode === "positions" ? "var(--lime)" : "var(--text-dim)",
               fontSize: 11,
               fontWeight: 500,
               fontFamily: theme.mono,
@@ -338,8 +350,8 @@ export function TerminalView({ positions, onSelect }: Props) {
               padding: "6px 10px",
               borderRadius: 6,
               border: "1px solid var(--card-border)",
-              background: viewMode === "market" ? "var(--lime-dim)" : "transparent",
-              color: viewMode === "market" ? "var(--lime)" : "var(--text-dim)",
+              background: effectiveViewMode === "market" ? "var(--lime-dim)" : "transparent",
+              color: effectiveViewMode === "market" ? "var(--lime)" : "var(--text-dim)",
               fontSize: 11,
               fontWeight: 500,
               fontFamily: theme.mono,
@@ -355,7 +367,7 @@ export function TerminalView({ positions, onSelect }: Props) {
         </div>
 
         {/* Timeframe */}
-        {viewMode === "positions" && (
+        {effectiveViewMode === "positions" && (
           <div style={{ display: "flex", gap: 4 }}>
             {TF_OPTIONS.map((tf, i) => (
               <button
@@ -365,8 +377,8 @@ export function TerminalView({ positions, onSelect }: Props) {
                   padding: "6px 10px",
                   borderRadius: 6,
                   border: "1px solid var(--card-border)",
-                  background: timeframe === i ? "var(--lime-dim)" : "transparent",
-                  color: timeframe === i ? "var(--lime)" : "var(--text-dim)",
+                  background: effectiveTimeframe === i ? "var(--lime-dim)" : "transparent",
+                  color: effectiveTimeframe === i ? "var(--lime)" : "var(--text-dim)",
                   fontSize: 11,
                   fontWeight: 500,
                   fontFamily: theme.mono,
@@ -440,7 +452,7 @@ export function TerminalView({ positions, onSelect }: Props) {
       {/* Content */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Widgets sidebar */}
-        {showWidgets && viewMode === "positions" && (
+        {showWidgets && effectiveViewMode === "positions" && (
           <>
             {isMobile && showWidgets && (
               <div
@@ -474,7 +486,7 @@ export function TerminalView({ positions, onSelect }: Props) {
               <style>{`.terminal-sidebar::-webkit-scrollbar { display: none }`}</style>
               <TerminalWidgets
                 onSelectSymbol={(symbol) => setModalSymbol(symbol)}
-                watchlist={watchlist}
+                watchlist={effectiveWatchlist}
                 onToggleWatchlist={toggleWatchlist}
               />
             </div>
@@ -489,7 +501,7 @@ export function TerminalView({ positions, onSelect }: Props) {
             overflow: "auto",
           }}
         >
-          {viewMode === "positions" && sorted.map((pos) => {
+          {effectiveViewMode === "positions" && sorted.map((pos) => {
             const panel = panels[pos.symbol];
             if (!panel) return null;
 
@@ -505,17 +517,17 @@ export function TerminalView({ positions, onSelect }: Props) {
               />
             );
           })}
-          {viewMode === "market" && (
+          {effectiveViewMode === "market" && (
             <MarketHeatmap
               onSelectSymbol={(symbol) => setModalSymbol(symbol)}
-              watchlist={watchlist}
+              watchlist={effectiveWatchlist}
               onToggleWatchlist={toggleWatchlist}
             />
           )}
         </div>
       </div>
 
-      {viewMode === "positions" && sorted.length === 0 && (
+      {effectiveViewMode === "positions" && sorted.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-dim)" }}>
           No positions found
         </div>
