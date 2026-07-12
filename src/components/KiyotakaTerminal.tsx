@@ -278,14 +278,14 @@ function adaptiveDownsample(bars: ParsedBar[], targetBars: number): ParsedBar[] 
 const MIN_BAR_WIDTH_PX = 3; // at least 3px per candle
 
 // TfInterval type for finer-grained fetch
-type TfInterval = "1d" | "4h" | "1h" | "15m";
+type TfInterval = "1d" | "4h" | "1h" | "15m" | "1m";
 
 // Zoom-in: fetch finer data when visible bars < 10% of total available
 // ~36 bars on 365 daily candles — user can clearly see individual candles
 const ZOOM_IN_FETCH_PCT = 0.10;
 
 // Tier order for zoom-in upgrades: 1d → 4h → 1h → 15m
-const TF_ZOOM_IN_ORDER: TfInterval[] = ["1d", "4h", "1h", "15m"];
+const TF_ZOOM_IN_ORDER: TfInterval[] = ["1d", "4h", "1h", "15m", "1m"];
 
 function nextFinerInterval(current: TfInterval): TfInterval | null {
   const idx = TF_ZOOM_IN_ORDER.indexOf(current);
@@ -1606,26 +1606,26 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       swapToTfRef.current = swapToTf;
 
-      // ── LIVE button: jump to 15m, show last ~1hr (4 candles) ──
+      // ── LIVE button: jump to 1m, show last ~1hr (60 candles) ──
       const goLive = async () => {
         const chart = chartRef.current;
         if (!chart || !mountedRef.current) return;
-        // Switch to 15m if not already
-        if (currentTfRef.current !== "15m") {
-          await swapToTf("15m");
+        // Switch to 1m if not already
+        if (currentTfRef.current !== "1m") {
+          await swapToTf("1m");
         }
-        // Zoom to last 4 candles (1hr)
+        // Zoom to last 60 candles (1hr)
         setTimeout(() => {
           const d = dataRef.current;
           if (!d || !chart) return;
           const total = d.dates.length - 1;
-          const showBars = 4;
+          const showBars = 60;
           const endPct = 100;
           const startPct = Math.max(0, 100 - (showBars / total) * 100);
           chart.setOption({ dataZoom: [{ id: "__kt_inside", start: startPct, end: endPct }] });
           zoomRef.current.start = startPct;
           zoomRef.current.end = endPct;
-          zoomRef.current.startVal = total - showBars;
+          zoomRef.current.startVal = Math.max(0, total - showBars);
           zoomRef.current.endVal = total;
         }, 100);
       };
