@@ -795,19 +795,10 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   const pixelToData = useCallback((px: number, py: number) => {
     const chart = chartRef.current;
     if (!chart || !dataRef.current) return null;
-    const d = dataRef.current;
-    const gridRect = chart.convertToPixel({ gridIndex: 0 }, [0, 0]);
-    const gridRect2 = chart.convertToPixel({ gridIndex: 0 }, [d.dates.length - 1, 9999]);
-    if (!gridRect || !gridRect2) return null;
-    const gridLeft = gridRect[0], gridTop = gridRect[1];
-    const gridRight = gridRect2[0], gridBottom = gridRect2[1];
-    const relX = px - gridLeft, relY = py - gridTop;
-    const gridW = gridRight - gridLeft, gridH = gridBottom - gridTop;
-    if (relX < 0 || relX > gridW || relY < 0 || relY > gridH) return null;
-    const dataIdx = Math.round(relX / gridW * (d.dates.length - 1));
     const pricePt = chart.convertFromPixel({ gridIndex: 0 }, [px, py]);
     if (!pricePt) return null;
-    return { idx: Math.max(0, Math.min(d.dates.length - 1, dataIdx)), price: pricePt[1] as number };
+    const d = dataRef.current;
+    return { idx: Math.max(0, Math.min(d.dates.length - 1, Math.round(pricePt[0] as number))), price: pricePt[1] as number };
   }, []);
 
   const dataToPixel = useCallback((idx: number, price: number) => {
@@ -1025,9 +1016,15 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       // Drawing events
       const zr = chart.getZr();
       const getPos = (e: MouseEvent | TouchEvent) => {
+        // zrender wraps DOM events — use e.event to access original DOM event
+        const raw = (e as any).event || e;
+        const src = raw.touches ? raw.touches[0] : raw;
+        // zrender provides offsetX/Y relative to canvas element
+        if ((e as any).offsetX != null) {
+          return { x: (e as any).offsetX, y: (e as any).offsetY };
+        }
         const rect = container.getBoundingClientRect();
-        const touch = (e as TouchEvent).touches ? (e as TouchEvent).touches[0] : e as MouseEvent;
-        return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+        return { x: src.clientX - rect.left, y: src.clientY - rect.top };
       };
 
       const onStart = (e: MouseEvent | TouchEvent) => {
@@ -1109,11 +1106,11 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       zr.on("mousemove", onMove);
       zr.on("mouseup", onEnd);
       // On mobile, native touch listeners with passive:false so we can preventDefault
-      // before the browser handles scroll/pinch. zr.on("touchstart") is passive and
-      // cannot preventDefault, which means drawing gestures get eaten by scroll/zoom.
-      const onTouchStartFn = (e: TouchEvent) => { if (currentToolRef.current !== "cursor") e.preventDefault(); zr.handler.dispatchGesture("touchstart", e); };
-      const onTouchMoveFn = (e: TouchEvent) => { if (isDrawingRef.current) e.preventDefault(); zr.handler.dispatchGesture("touchmove", e); };
-      const onTouchEndFn = (e: TouchEvent) => { zr.handler.dispatchGesture("touchend", e); };
+      // before the browser handles scroll/pinch. zrender's HandlerProxy already converts
+      // touch→mousedown/mousemove/mouseup internally, so we just need to prevent scroll.
+      const onTouchStartFn = (e: TouchEvent) => { if (currentToolRef.current !== "cursor") e.preventDefault(); };
+      const onTouchMoveFn = (e: TouchEvent) => { if (isDrawingRef.current) e.preventDefault(); };
+      const onTouchEndFn = (_e: TouchEvent) => {};
       onTouchStart = onTouchStartFn;
       onTouchMove = onTouchMoveFn;
       onTouchEnd = onTouchEndFn;
