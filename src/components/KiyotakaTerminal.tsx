@@ -1025,8 +1025,12 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         if (endVal - startVal < MIN_VISIBLE) return;
         zoomRef.current.startVal = startVal;
         zoomRef.current.endVal = endVal;
-        chart.setOption({
-          dataZoom: [{ id: "__slider", startValue: startVal, endValue: endVal }],
+        // Use dispatchAction — the reliable way to control dataZoom
+        chart.dispatchAction({
+          type: "dataZoom",
+          dataZoomIndex: 0,
+          startValue: startVal,
+          endValue: endVal,
         });
         // Sync zoomRef percentage for slider
         const total = d.dates.length - 1;
