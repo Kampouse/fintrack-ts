@@ -1234,45 +1234,21 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         const zoomFactor = raw.deltaY > 0 ? 1.08 : 1 / 1.08;
         const newRange = Math.max(2, Math.min(98, range * zoomFactor));
 
-        // Use convertFromPixel to get the exact data-axis % at cursor X
-        // This accounts for Y-axis label padding, grid offsets, etc.
-        const xAxisModel = chart.getModel().getComponent("xAxis", 0);
-        const axis = xAxisModel?.axis;
-        if (axis) {
-          const pixelCoord = chart.convertFromPixel({ xAxisIndex: 0 }, [e.offsetX, e.offsetY]) as number[];
-          if (pixelCoord && pixelCoord.length) {
-            // pixelCoord[0] is the data value at cursor X
-            const d = dataRef.current;
-            if (d && d.dates.length > 1) {
-              const total = d.dates.length - 1;
-              const dataIndex = pixelCoord[0]; // float index on x-axis
-              const cursorPct = (dataIndex / total) * 100;
-              const clampedPct = Math.max(start, Math.min(end, cursorPct));
-              const fraction = (clampedPct - start) / range; // 0..1 within visible range
-              let ns = clampedPct - newRange * fraction;
-              let ne = ns + newRange;
-              if (ns < 0) { ns = 0; ne = newRange; }
-              if (ne > 100) { ne = 100; ns = 100 - newRange; }
-              chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
-              zoomRef.current.start = ns;
-              zoomRef.current.end = ne;
-              zoomRef.current.startVal = Math.round((ns / 100) * total);
-              zoomRef.current.endVal = Math.round((ne / 100) * total);
-            }
-            scheduleRebuild();
-            scheduleResCheck();
-            return;
-          }
+        // Get chart grid rect to compute cursor X within the actual plotting area
+        // (not the full container which includes Y-axis labels)
+        const gridModel = chart.getModel().getComponent("grid", 0);
+        let cursorX = 0.5; // fallback: center
+        if (gridModel && gridModel.coordinateSystem) {
+          const g = gridModel.coordinateSystem.getRect();
+          cursorX = Math.max(0, Math.min(1, (e.offsetX - g.x) / g.width));
         }
 
-        // Fallback: pixel-based cursor (less accurate with axis padding)
-        const rect = container.getBoundingClientRect();
-        const cursorX = (raw.clientX - rect.left) / rect.width;
-        const cursorPct = start + (end - start) * cursorX;
+        const cursorPct = start + range * cursorX;
         let ns = cursorPct - newRange * cursorX;
         let ne = ns + newRange;
         if (ns < 0) { ns = 0; ne = newRange; }
         if (ne > 100) { ne = 100; ns = 100 - newRange; }
+
         chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
         zoomRef.current.start = ns;
         zoomRef.current.end = ne;
