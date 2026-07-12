@@ -1222,30 +1222,52 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
       };
 
-      // Ctrl/Cmd+wheel → zoom, plain scroll → pan
-      // Toggle dataZoom behavior on modifier key so ECharts handles cursor anchoring natively
-      const dzZoomOn = () => {
-        chart.setOption({
-          dataZoom: [{
-            id: "__kt_inside",
-            zoomOnMouseWheel: true,
-            moveOnMouseWheel: false,
-          }]
-        });
-      };
-      const dzZoomOff = () => {
-        chart.setOption({
-          dataZoom: [{
-            id: "__kt_inside",
-            zoomOnMouseWheel: false,
-            moveOnMouseWheel: true,
-          }]
-        });
-      };
-      const onKD = (e: KeyboardEvent) => { if (e.key === "Control" || e.key === "Meta") dzZoomOn(); };
-      const onKU = (e: KeyboardEvent) => { if (e.key === "Control" || e.key === "Meta") dzZoomOff(); };
-      document.addEventListener("keydown", onKD);
-      document.addEventListener("keyup", onKU);
+      // Ctrl/Cmd+wheel → zoom anchored at cursor
+      let lastCtrlWheelTime = 0;
+      zr.on("mousewheel", (e: any) => {
+        const raw = e.event as WheelEvent;
+        if (!raw.ctrlKey && !raw.metaKey) return; // let native dataZoom handle scroll=pan
+        e.stop();
+        const now = performance.now();
+        if (now - lastCtrlWheelTime < 16) return;
+        lastCtrlWheelTime = now;
+
+        // Read actual dataZoom state from ECharts
+        const opt = chart.getOption() as any;
+        const dz = ((opt.dataZoom || []).find((d: any) => d.id === "__kt_inside"));
+        if (!dz) return;
+        const start = dz.start as number;
+        const end = dz.end as number;
+        const range = end - start;
+        const factor = raw.deltaY > 0 ? 1.1 : 1 / 1.1;
+        const newRange = Math.max(2, Math.min(98, range * factor));
+
+        // Get grid rect via coordinate system to compute cursor position accurately
+        let cursorFrac = 0.5;
+        const coordSys = (chart as any).getCoordinateSystems?.();
+        if (coordSys?.[0]?.getRect) {
+          const r = coordSys[0].getRect();
+          cursorFrac = Math.max(0, Math.min(1, (e.offsetX - r.x) / r.width));
+        }
+
+        const cursorPct = start + range * cursorFrac;
+        let ns = cursorPct - newRange * cursorFrac;
+        let ne = ns + newRange;
+        if (ns < 0) { ns = 0; ne = newRange; }
+        if (ne > 100) { ne = 100; ns = 100 - newRange; }
+
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
+        zoomRef.current.start = ns;
+        zoomRef.current.end = ne;
+        const d = dataRef.current;
+        if (d) {
+          const total = d.dates.length - 1;
+          zoomRef.current.startVal = Math.round((ns / 100) * total);
+          zoomRef.current.endVal = Math.round((ne / 100) * total);
+        }
+        scheduleRebuild();
+        scheduleResCheck();
+      });
 
       // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
       let lastPanStart = 0;
@@ -1692,8 +1714,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       mountedRef.current = false;
       if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = null; }
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-      if (typeof onKD === "function") document.removeEventListener("keydown", onKD);
-      if (typeof onKU === "function") document.removeEventListener("keyup", onKU);
       const chart = chartRef.current;
       if (chart) {
         const c = chartContainerRef.current;
