@@ -996,10 +996,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           xAxisIndex: allIdx,
           start: zoomRef.current.start,
           end: zoomRef.current.end,
-          zoomOnMouseWheel: false,   // scroll = pan, not zoom (like kiyotaka)
-          moveOnMouseMove: true,     // drag = pan
-          moveOnMouseWheel: true,    // scroll wheel = pan
-          moveOnMouseMoveLock: true,
         },
         {
           type: "slider", xAxisIndex: allIdx, bottom: 4, height: 20,
@@ -1221,51 +1217,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         if (zoomRebuildTimer.id) clearTimeout(zoomRebuildTimer.id);
         zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
       };
-
-      // Ctrl/Cmd+wheel → zoom anchored at cursor
-      let lastCtrlWheelTime = 0;
-      zr.on("mousewheel", (e: any) => {
-        const raw = e.event as WheelEvent;
-        if (!raw.ctrlKey && !raw.metaKey) return; // let native dataZoom handle scroll=pan
-        e.stop();
-        const now = performance.now();
-        if (now - lastCtrlWheelTime < 16) return;
-        lastCtrlWheelTime = now;
-
-        // Read actual dataZoom state from ECharts
-        const opt = chart.getOption() as any;
-        const dz = ((opt.dataZoom || []).find((d: any) => d.id === "__kt_inside"));
-        if (!dz) return;
-        const start = dz.start as number;
-        const end = dz.end as number;
-        const range = end - start;
-        const factor = raw.deltaY > 0 ? 1.1 : 1 / 1.1;
-        const newRange = Math.max(2, Math.min(98, range * factor));
-
-        // Grid has left:50 right:60 (px). Compute cursor fraction within plot area.
-        const rect = container.getBoundingClientRect();
-        const plotLeft = 50;
-        const plotWidth = rect.width - 50 - 60;
-        const cursorFrac = plotWidth > 0 ? Math.max(0, Math.min(1, (raw.clientX - rect.left - plotLeft) / plotWidth)) : 0.5;
-
-        const cursorPct = start + range * cursorFrac;
-        let ns = cursorPct - newRange * cursorFrac;
-        let ne = ns + newRange;
-        if (ns < 0) { ns = 0; ne = newRange; }
-        if (ne > 100) { ne = 100; ns = 100 - newRange; }
-
-        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
-        zoomRef.current.start = ns;
-        zoomRef.current.end = ne;
-        const d = dataRef.current;
-        if (d) {
-          const total = d.dates.length - 1;
-          zoomRef.current.startVal = Math.round((ns / 100) * total);
-          zoomRef.current.endVal = Math.round((ne / 100) * total);
-        }
-        scheduleRebuild();
-        scheduleResCheck();
-      });
 
       // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
       let lastPanStart = 0;
