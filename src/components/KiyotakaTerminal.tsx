@@ -1482,45 +1482,10 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       swapToTfRef.current = swapToTf;
 
-      // Manual pinch zoom (zrender v6 doesn't dispatch pinch events)
-      let pinchStartData: { start: number; end: number; dist: number } | null = null;
-      const onTouchPinchStart = (e: TouchEvent) => {
-        if (e.touches.length !== 2 || !dataRef.current) return;
-        e.preventDefault();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        pinchStartData = { start: zoomRef.current.start, end: zoomRef.current.end, dist: Math.hypot(dx, dy) };
-      };
-      const onTouchPinchMove = (e: TouchEvent) => {
-        if (!pinchStartData || e.touches.length !== 2) return;
-        e.preventDefault();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.hypot(dx, dy);
-        const scale = dist / pinchStartData.dist;
-        const range = pinchStartData.end - pinchStartData.start;
-        const newRange = Math.max(5, range / scale); // pinch out = zoom in = smaller range
-        const center = (pinchStartData.start + pinchStartData.end) / 2;
-        let ns = center - newRange / 2;
-        let ne = center + newRange / 2;
-        if (ns < 0) { ns = 0; ne = newRange; }
-        if (ne > 100) { ne = 100; ns = 100 - newRange; }
-        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
-        zoomRef.current.start = ns;
-        zoomRef.current.end = ne;
-        const d = dataRef.current;
-        if (d) {
-          const total = d.dates.length - 1;
-          zoomRef.current.startVal = Math.round((ns / 100) * total);
-          zoomRef.current.endVal = Math.round((ne / 100) * total);
-        }
-        scheduleRebuild();
-        scheduleResCheck();
-      };
-      const onTouchPinchEnd = () => { pinchStartData = null; };
-      container.addEventListener("touchstart", onTouchPinchStart, { passive: false });
-      container.addEventListener("touchmove", onTouchPinchMove, { passive: false });
-      container.addEventListener("touchend", onTouchPinchEnd, { passive: false });
+      // Pinch zoom — handled natively by zrender GestureMgr + ECharts RoamController.
+      // We only listen for touchend to trigger resolution check (zoom-in fetch / zoom-out downsample).
+      const onTouchEnd = () => { scheduleResCheck(); };
+      container.addEventListener("touchend", onTouchEnd, { passive: true });
 
       // Drawing events
       const getPos = (e: MouseEvent | TouchEvent) => {
