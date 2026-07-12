@@ -1014,7 +1014,8 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           xAxisIndex: allIdx,
           start: zoomRef.current.start,
           end: zoomRef.current.end,
-          zoomOnMouseWheel: true,
+          zoomOnMouseWheel: false, // manual wheel handler below
+          moveOnMouseMove: true,   // drag to pan
         },
         {
           type: "slider", xAxisIndex: allIdx, bottom: 4, height: 20,
@@ -1227,6 +1228,41 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       // Get zrender instance — needed by zoom/pan AND drawing handlers
       const zr = chart.getZr();
+
+      // ── Manual wheel zoom (bypass whatever blocks native dataZoom) ──
+      container.addEventListener("wheel", (e: WheelEvent) => {
+        e.preventDefault();
+        const opt = chart.getOption();
+        const dz = opt.dataZoom?.[0];
+        if (!dz) return;
+        let start = dz.start as number;
+        let end = dz.end as number;
+        const range = end - start;
+        // Zoom factor: each wheel tick = 10% zoom
+        const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+        const newRange = Math.min(98, Math.max(1, range * factor));
+        // Anchor zoom at cursor X position
+        const rect = container.getBoundingClientRect();
+        const cursorPct = (e.clientX - rect.left) / rect.width * 100;
+        const cursorRatio = (cursorPct - start) / range;
+        const newStart = cursorPct - cursorRatio * newRange;
+        const newEnd = newStart + newRange;
+        // Clamp
+        const clampedStart = Math.max(0, Math.min(newStart, 99 - newRange));
+        const clampedEnd = clampedStart + newRange;
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: clampedStart, end: clampedEnd }] });
+        zoomRef.current.start = clampedStart;
+        zoomRef.current.end = clampedEnd;
+        const d = dataRef.current;
+        if (d) {
+          const total = d.dates.length - 1;
+          zoomRef.current.startVal = Math.round((clampedStart / 100) * total);
+          zoomRef.current.endVal = Math.round((clampedEnd / 100) * total);
+        }
+        scheduleRebuild();
+        scheduleResCheck();
+      }, { passive: false });
+
 
       // ── Zoom: scroll=pan, drag=pan via dataZoom inside ──
       // ── KT-06: Ctrl/Cmd+scroll = zoom (anchored at cursor) ──
