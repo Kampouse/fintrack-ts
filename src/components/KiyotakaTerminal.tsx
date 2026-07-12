@@ -199,10 +199,10 @@ interface TfTier {
 }
 
 const TF_TIERS: TfTier[] = [
-  { interval: "1d",  label: "1D",  downAt: 20,  upAt: 30 },
-  { interval: "4h",  label: "4H",  downAt: 40,  upAt: 60 },
-  { interval: "1h",  label: "1H",  downAt: 60,  upAt: 100 },
-  { interval: "15m", label: "15m", downAt: 0,   upAt: 999 }, // finest, never downgrades
+  { interval: "1d",  label: "1D",  downAt: 0,   upAt: 60 },  // zoomed out: 60+ bars visible → 1D
+  { interval: "4h",  label: "4H",  downAt: 30,  upAt: 40 }, // medium zoom: 30-39 bars → 4H
+  { interval: "1h",  label: "1H",  downAt: 15,  upAt: 25 }, // zoomed in: 15-24 bars → 1H
+  { interval: "15m", label: "15m", downAt: 0,   upAt: 15 }, // most zoomed in: <15 bars → 15m
 ];
 
 function getTierForBars(visibleBars: number): TfTier {
@@ -1246,22 +1246,13 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       updateTfBadge("1D");
 
       const checkTfSwap = () => {
-        const chart = chartRef.current;
         const d = dataRef.current;
-        if (!chart || !d) return;
+        if (!d) return;
         const { start, end } = zoomRef.current;
         const visibleBars = Math.round(((end - start) / 100) * (d.dates.length - 1));
-        const currentTier = getTierForBars(visibleBars);
-        const currentIdx = tierIndex(currentTfRef.current);
-
-        if (currentTier.interval !== currentTfRef.current) {
-          const targetIdx = tierIndex(currentTier.interval);
-          // Only swap if going deeper (zoom in) OR if significantly zoomed out
-          if (targetIdx > currentIdx) {
-            swapToTf(currentTier.interval);
-          } else if (targetIdx < currentIdx && visibleBars >= TF_TIERS[currentIdx].upAt) {
-            swapToTf(currentTier.interval);
-          }
+        const targetTier = getTierForBars(visibleBars);
+        if (targetTier.interval !== currentTfRef.current) {
+          swapToTf(targetTier.interval);
         }
       };
 
