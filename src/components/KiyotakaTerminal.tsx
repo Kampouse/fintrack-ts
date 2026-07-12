@@ -1,6 +1,6 @@
 // @ts-nocheck
 // This file is a 1:1 port of kiyotaka-chart (vanilla JS) — echarts 5 type defs are incomplete for graphic API
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import * as echarts from "echarts";
 import { Line as ZrLine, Rect as ZrRect, Text as ZrText, Polyline as ZrPolyline } from "zrender";
 import { labelFromSymbol } from "@/lib/constants";
@@ -384,17 +384,24 @@ const KIYOTAKA_CSS = `
 
   .kt-symbol-badge { display: flex; align-items: baseline; gap: 8px; }
   .kt-tf-badge {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .kt-tf-btn {
     font-size: 11px;
-    color: #00EC97;
-    background: rgba(0, 236, 151, .12);
-    padding: 2px 7px;
+    color: #666;
+    background: rgba(255, 255, 255, .03);
+    border: 1px solid transparent;
+    padding: 2px 6px;
     border-radius: 4px;
     font-weight: 600;
     letter-spacing: .5px;
-    flex-shrink: 0;
-    transition: all .2s;
+    cursor: pointer;
+    transition: all .15s;
   }
-  .kt-tf-val { /* text set by JS */ }
+  .kt-tf-btn:hover { color: #aaa; background: rgba(255,255,255,.06); }
+  .kt-tf-btn.active { color: #00EC97; background: rgba(0,236,151,.12); border-color: rgba(0,236,151,.25); }
   .kt-symbol { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: .3px; }
   .kt-pair-label { font-size: 13px; color: #888; font-weight: 500; }
   .kt-price-block { display: flex; align-items: baseline; gap: 10px; }
@@ -616,6 +623,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   const panelHeightsRef = useRef({ main: 72, volume: 9, bodyRatio: 9, rsi: 12, macd: 12 });
   const zoomRef = useRef({ start: 60, end: 100, startVal: 0, endVal: 0 });
   const currentTfRef = useRef<TfInterval>("1d"); // current timeframe
+  const [tfDisplay, setTfDisplay] = useState<TfInterval>("1d"); // for JSX re-render
   const rawBarsRef = useRef<ParsedBar[]>([]); // raw bars before downsampling
   const tfCacheRef = useRef<Map<string, ParsedBar[]>>(new Map()); // cache per interval
   const tfFetchRef = useRef<Promise<void> | null>(null); // dedup in-flight fetches
@@ -1139,6 +1147,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       const binSymbol = getBinanceSymbol();
       binSymbolRef.current = binSymbol;
       currentTfRef.current = "1d";
+      setTfDisplay("1d");
 
       const bars = await fetchKlines(binSymbol, "1d");
       if (!mountedRef.current || !container || cancelled) return;
@@ -1412,6 +1421,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
             if (!mountedRef.current || !chart) return;
 
             currentTfRef.current = newInterval;
+            setTfDisplay(newInterval);
             rawBarsRef.current = bars;
 
             // Downsample if needed based on current zoom
@@ -1811,7 +1821,15 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         <div className="kt-symbol-badge">
           <span className="kt-symbol">{displaySymbol}</span>
           <span className="kt-pair-label">/ USDT</span>
-          <span className="kt-tf-badge"><span className="kt-tf-val">1D</span></span>
+          <div className="kt-tf-badge">
+            {TF_ZOOM_IN_ORDER.map(tf => (
+              <button
+                key={tf}
+                className={"kt-tf-btn" + (tfDisplay === tf ? " active" : "")}
+                onClick={() => swapToTfRef.current(tf)}
+              >{tf.toUpperCase()}</button>
+            ))}
+          </div>
         </div>
         <div className="kt-price-block">
           <span className="kt-price kt-price-val">—</span>
