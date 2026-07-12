@@ -951,6 +951,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
     }
     mountedRef.current = true;
     let cancelled = false;
+    let momentumRaf: number | null = null; // KT-04: accessible in cleanup
 
     const container = chartContainerRef.current;
     if (!container) return;
@@ -1094,7 +1095,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       });
 
       // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
-      let momentumRaf: number | null = null;
       let lastPanStart = 0;
       let lastPanTime = 0;
       let panVelocity = 0; // % per ms
