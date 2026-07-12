@@ -776,7 +776,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       yAxis,
       dataZoom: [
         {
-          type: "inside",
+          type: "inside", id: "__kt_inside",
           xAxisIndex: allIdx,
           start: zoomRef.current.start,
           end: zoomRef.current.end,
@@ -784,7 +784,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           moveOnMouseMove: true,     // drag = pan
           moveOnMouseWheel: true,    // scroll wheel = pan
           moveOnMouseMoveLock: true,
-          zoomOnPinch: true,         // pinch = zoom (mobile)
         },
         {
           type: "slider", xAxisIndex: allIdx, bottom: 4, height: 20,
@@ -1019,14 +1018,53 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       // Get zrender instance — needed by zoom/pan AND drawing handlers
       const zr = chart.getZr();
 
-      // ── Zoom: scroll=pan, drag=pan, pinch=zoom (via dataZoom inside) ──
+      // ── Zoom: scroll=pan, drag=pan via dataZoom inside ──
       const zoomRebuildTimer = { id: null as ReturnType<typeof setTimeout> | null };
       const scheduleRebuild = () => {
         if (zoomRebuildTimer.id) clearTimeout(zoomRebuildTimer.id);
         zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
       };
 
-      // Sync zoom state from dataZoom events (scroll/drag/pinch/slider)
+      // Manual pinch zoom (zrender v6 doesn't dispatch pinch events)
+      let pinchStartData: { start: number; end: number; dist: number } | null = null;
+      const onTouchPinchStart = (e: TouchEvent) => {
+        if (e.touches.length !== 2 || !dataRef.current) return;
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchStartData = { start: zoomRef.current.start, end: zoomRef.current.end, dist: Math.hypot(dx, dy) };
+      };
+      const onTouchPinchMove = (e: TouchEvent) => {
+        if (!pinchStartData || e.touches.length !== 2) return;
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const scale = dist / pinchStartData.dist;
+        const range = pinchStartData.end - pinchStartData.start;
+        const newRange = Math.max(5, range / scale); // pinch out = zoom in = smaller range
+        const center = (pinchStartData.start + pinchStartData.end) / 2;
+        let ns = center - newRange / 2;
+        let ne = center + newRange / 2;
+        if (ns < 0) { ns = 0; ne = newRange; }
+        if (ne > 100) { ne = 100; ns = 100 - newRange; }
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
+        zoomRef.current.start = ns;
+        zoomRef.current.end = ne;
+        const d = dataRef.current;
+        if (d) {
+          const total = d.dates.length - 1;
+          zoomRef.current.startVal = Math.round((ns / 100) * total);
+          zoomRef.current.endVal = Math.round((ne / 100) * total);
+        }
+        scheduleRebuild();
+      };
+      const onTouchPinchEnd = () => { pinchStartData = null; };
+      container.addEventListener("touchstart", onTouchPinchStart, { passive: false });
+      container.addEventListener("touchmove", onTouchPinchMove, { passive: false });
+      container.addEventListener("touchend", onTouchPinchEnd, { passive: false });
+
+      // Sync zoom state from dataZoom events (scroll/drag/slider)
       chart.on("dataZoom", () => {
         try {
           const opt = chart.getOption();
