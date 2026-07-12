@@ -1213,54 +1213,30 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
       };
 
-      // Ctrl/Cmd+wheel → zoom (anchored at cursor position)
-      let lastCtrlWheelTime = 0;
-      zr.on("mousewheel", (e: any) => {
-        const raw = e.event as WheelEvent;
-        if (!raw.ctrlKey && !raw.metaKey) return; // let dataZoom handle plain scroll=pan
-        e.stop();
-        const now = performance.now();
-        if (now - lastCtrlWheelTime < 16) return; // throttle to ~60fps
-        lastCtrlWheelTime = now;
-
-        // Read actual dataZoom state
-        const opt = chart.getOption() as any;
-        const dzArr = (opt.dataZoom || []).filter((dz: any) => dz.id === "__kt_inside");
-        if (!dzArr.length) return;
-        const dz = dzArr[0];
-        const start = dz.start as number;
-        const end = dz.end as number;
-        const range = end - start;
-        const zoomFactor = raw.deltaY > 0 ? 1.08 : 1 / 1.08;
-        const newRange = Math.max(2, Math.min(98, range * zoomFactor));
-
-        // Get chart grid rect to compute cursor X within the actual plotting area
-        // (not the full container which includes Y-axis labels)
-        const gridModel = chart.getModel().getComponent("grid", 0);
-        let cursorX = 0.5; // fallback: center
-        if (gridModel && gridModel.coordinateSystem) {
-          const g = gridModel.coordinateSystem.getRect();
-          cursorX = Math.max(0, Math.min(1, (e.offsetX - g.x) / g.width));
-        }
-
-        const cursorPct = start + range * cursorX;
-        let ns = cursorPct - newRange * cursorX;
-        let ne = ns + newRange;
-        if (ns < 0) { ns = 0; ne = newRange; }
-        if (ne > 100) { ne = 100; ns = 100 - newRange; }
-
-        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
-        zoomRef.current.start = ns;
-        zoomRef.current.end = ne;
-        const d = dataRef.current;
-        if (d) {
-          const total = d.dates.length - 1;
-          zoomRef.current.startVal = Math.round((ns / 100) * total);
-          zoomRef.current.endVal = Math.round((ne / 100) * total);
-        }
-        scheduleRebuild();
-        scheduleResCheck();
-      });
+      // Ctrl/Cmd+wheel → zoom, plain scroll → pan
+      // Toggle dataZoom behavior on modifier key so ECharts handles cursor anchoring natively
+      const dzZoomOn = () => {
+        chart.setOption({
+          dataZoom: [{
+            id: "__kt_inside",
+            zoomOnMouseWheel: true,
+            moveOnMouseWheel: false,
+          }]
+        });
+      };
+      const dzZoomOff = () => {
+        chart.setOption({
+          dataZoom: [{
+            id: "__kt_inside",
+            zoomOnMouseWheel: false,
+            moveOnMouseWheel: true,
+          }]
+        });
+      };
+      const onKD = (e: KeyboardEvent) => { if (e.key === "Control" || e.key === "Meta") dzZoomOn(); };
+      const onKU = (e: KeyboardEvent) => { if (e.key === "Control" || e.key === "Meta") dzZoomOff(); };
+      document.addEventListener("keydown", onKD);
+      document.addEventListener("keyup", onKU);
 
       // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
       let lastPanStart = 0;
@@ -1706,6 +1682,8 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       mountedRef.current = false;
       if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = null; }
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+      document.removeEventListener("keydown", onKD);
+      document.removeEventListener("keyup", onKU);
       const chart = chartRef.current;
       if (chart) {
         const c = chartContainerRef.current;
@@ -1713,9 +1691,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           if (onTouchStart) c.removeEventListener("touchstart", onTouchStart as EventListener);
           if (onTouchMove) c.removeEventListener("touchmove", onTouchMove as EventListener);
           if (onTouchEnd) c.removeEventListener("touchend", onTouchEnd as EventListener);
-          c.removeEventListener("touchstart", onTouchPinchStart as EventListener);
-          c.removeEventListener("touchmove", onTouchPinchMove as EventListener);
-          c.removeEventListener("touchend", onTouchPinchEnd as EventListener);
           c.removeEventListener("touchend", startMomentum as EventListener);
         }
         chart.dispose();
