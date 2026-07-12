@@ -1288,9 +1288,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       container.addEventListener("touchend", startMomentum);
 
       // ── Adaptive resolution: downsample on zoom-out, fetch on zoom-in ──
-      const tfBadge = rootRef.current?.querySelector(".kt-tf-val");
-      const updateTfBadge = (label: string) => { if (tfBadge) tfBadge.textContent = label; };
-      updateTfBadge("1D");
+      // TF badge managed by React state (setTfDisplay)
 
       // Measure chart width for downsampling calc
       const measureChartWidth = () => {
@@ -1303,6 +1301,21 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       window.addEventListener("resize", measureChartWidth);
 
       // Check if we need finer data (zoom-in only) or to downsample (zoom-out)
+      // Update series data WITHOUT touching dataZoom (avoids fighting native zoom)
+      const updateSeriesData = (chart: echarts.ECharts, data: any) => {
+        chart.setOption({
+          xAxis: { data: data.dates },
+          series: [
+            { data: data.candles },
+            { data: data.volumes },
+            { data: data.smas },
+            { data: data.ema20s },
+            { data: data.ema50s },
+            { data: data.bbands },
+          ],
+        });
+      };
+
       const checkResolution = () => {
         const chart = chartRef.current;
         const d = dataRef.current;
@@ -1343,7 +1356,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
             if (downsampled.length < rawBars.length) {
               const data = processBars(downsampled);
               dataRef.current = data;
-              chart.setOption(buildOption(), true);
+              updateSeriesData(chart, data);
               const newTotal = data.dates.length - 1;
               zoomRef.current.startVal = Math.round((start / 100) * newTotal);
               zoomRef.current.endVal = Math.round((end / 100) * newTotal);
@@ -1352,7 +1365,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
             if (rawBars.length !== totalBars) {
               const data = processBars(rawBars);
               dataRef.current = data;
-              chart.setOption(buildOption(), true);
+              updateSeriesData(chart, data);
               const newTotal = data.dates.length - 1;
               zoomRef.current.startVal = Math.round((start / 100) * newTotal);
               zoomRef.current.endVal = Math.round((end / 100) * newTotal);
@@ -1412,7 +1425,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
             // Update header
             const label = newInterval.toUpperCase() === "1D" ? "1D" : newInterval.toUpperCase();
-            updateTfBadge(label);
+            // TF badge updated by setTfDisplay (React state)
             const { ohlc } = data;
             const lastCandle = ohlc[ohlc.length - 1];
             const prevClose = ohlc.length >= 2 ? ohlc[ohlc.length - 2][1] : lastCandle[0];
