@@ -494,7 +494,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
     heikinAshiOHLC: number[][];
   } | null>(null);
   const panelHeightsRef = useRef({ main: 72, volume: 9, bodyRatio: 9, rsi: 12, macd: 12 });
-  const zoomRef = useRef({ start: 60, end: 100 });
+  const zoomRef = useRef({ start: 60, end: 100, startVal: 0, endVal: 0 });
   const drawingsRef = useRef<unknown[]>([]);
   const currentToolRef = useRef("cursor");
   const isDrawingRef = useRef(false);
@@ -775,7 +775,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       xAxis,
       yAxis,
       dataZoom: [
-        { type: "inside", xAxisIndex: allIdx, start: zoomRef.current.start, end: zoomRef.current.end },
         {
           type: "slider", xAxisIndex: allIdx, bottom: 4, height: 20,
           borderColor: "transparent", backgroundColor: "#161618",
@@ -961,6 +960,11 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         smaData, emaData, bb, vwapData, rsiData, macd, heikinAshiOHLC,
       };
 
+      // Initialize zoom range as data indices
+      const totalBars = dates.length - 1;
+      zoomRef.current.startVal = Math.round((zoomRef.current.start / 100) * totalBars);
+      zoomRef.current.endVal = Math.round((zoomRef.current.end / 100) * totalBars);
+
       const loader = container.querySelector(".kt-loader");
       if (loader) loader.remove();
       if (cancelled) return;
@@ -1001,16 +1005,126 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       chart.setOption(option, true);
       chart.setOption({ animation: true, animationDuration: 400 });
 
-      // Track zoom
+      // ── Custom zoom & pan (bypasses clunky dataZoom inside) ──
+      const ZOOM_SENSITIVITY = 0.002;   // radians per pixel of wheel delta
+      const MIN_VISIBLE = 10;           // minimum visible candles
+      const zoomRebuildTimer = { id: null as ReturnType<typeof setTimeout> | null };
+      const scheduleRebuild = () => {
+        if (zoomRebuildTimer.id) clearTimeout(zoomRebuildTimer.id);
+        zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
+      };
+
+      const applyVisibleRange = (startVal: number, endVal: number) => {
+        const d = dataRef.current;
+        if (!d || !chart) return;
+        startVal = Math.max(0, Math.round(startVal));
+        endVal = Math.min(d.dates.length - 1, Math.round(endVal));
+        if (endVal - startVal < MIN_VISIBLE) return;
+        zoomRef.current.startVal = startVal;
+        zoomRef.current.endVal = endVal;
+        chart.setOption({
+          dataZoom: [{ id: "__slider", startValue: startVal, endValue: endVal }],
+        });
+        // Sync zoomRef percentage for slider
+        const total = d.dates.length - 1;
+        zoomRef.current.start = (startVal / total) * 100;
+        zoomRef.current.end = (endVal / total) * 100;
+        scheduleRebuild();
+      };
+
+      // ── Wheel zoom ──
+      zr.on("mousewheel", (e: any) => {
+        if (!dataRef.current) return;
+        const d = dataRef.current;
+        const z = zoomRef.current;
+        const range = z.endVal - z.startVal;
+        // Get mouse position as fraction of visible range
+        const rect = zr.dom.getBoundingClientRect();
+        const mouseX = e.offsetX;
+        const frac = Math.max(0, Math.min(1, mouseX / rect.width));
+        // Zoom factor from wheel delta — positive wheelDelta = scroll up = zoom in
+        const delta = e.wheelDelta != null ? -e.wheelDelta : (e.deltaY || 0);
+        const factor = 1 + delta * ZOOM_SENSITIVITY;
+        const newRange = Math.max(MIN_VISIBLE, range * factor);
+        const anchorVal = z.startVal + range * frac;
+        let newStart = anchorVal - newRange * frac;
+        let newEnd = anchorVal + newRange * (1 - frac);
+        newStart = Math.max(0, Math.round(newStart));
+        newEnd = Math.min(d.dates.length - 1, Math.round(newEnd));
+        if (newEnd - newStart < MIN_VISIBLE) return;
+        e.event?.preventDefault?.();
+        applyVisibleRange(newStart, newEnd);
+      });
+
+      // ── Drag to pan (cursor mode) ──
+      let panStart = null as { x: number; startVal: number; endVal: number } | null;
+      const onPanDown = (e: any) => {
+        if (currentToolRef.current !== "cursor") return;
+        panStart = { x: (e as MouseEvent).clientX, startVal: zoomRef.current.startVal, endVal: zoomRef.current.endVal };
+      };
+      const onPanMove = (e: any) => {
+        if (!panStart || currentToolRef.current !== "cursor") return;
+        const dx = (e as MouseEvent).clientX - panStart.x;
+        const rect = container.getBoundingClientRect();
+        const d = dataRef.current;
+        if (!d) return;
+        const range = panStart.endVal - panStart.startVal;
+        const shift = -(dx / rect.width) * range;
+        let s = panStart.startVal + shift;
+        let e2 = panStart.endVal + shift;
+        if (s < 0) { e2 -= s; s = 0; }
+        if (e2 > d.dates.length - 1) { s -= (e2 - d.dates.length + 1); e2 = d.dates.length - 1; }
+        s = Math.max(0, s);
+        applyVisibleRange(Math.round(s), Math.round(e2));
+      };
+      const onPanUp = () => { panStart = null; };
+
+      // ── Pinch zoom (mobile) ──
+      let pinchStart = null as { startVal: number; endVal: number; scale: number } | null;
+      zr.on("pinchstart", (e: any) => {
+        if (!dataRef.current) return;
+        pinchStart = { startVal: zoomRef.current.startVal, endVal: zoomRef.current.endVal, scale: e.pinchScale || 1 };
+      });
+      zr.on("pinch", (e: any) => {
+        if (!pinchStart || !dataRef.current) return;
+        const d = dataRef.current;
+        const range = pinchStart.endVal - pinchStart.startVal;
+        const ratio = pinchStart.scale / (e.pinchScale || 1);
+        const newRange = Math.max(MIN_VISIBLE, range * ratio);
+        const center = (pinchStart.startVal + pinchStart.endVal) / 2;
+        let s = center - newRange / 2;
+        let e2 = center + newRange / 2;
+        s = Math.max(0, s);
+        e2 = Math.min(d.dates.length - 1, e2);
+        if (e2 - s < MIN_VISIBLE) return;
+        applyVisibleRange(Math.round(s), Math.round(e2));
+      });
+      zr.on("pinchend", () => { pinchStart = null; });
+
+      // Register handlers
+      zr.on("mousedown", onPanDown);
+      zr.on("mousemove", onPanMove);
+      zr.on("mouseup", onPanUp);
+      // Also handle drag via zrender's globalout (mouse leaves canvas)
+      zr.on("globalout", onPanUp);
+
+      // Slider dataZoom sync
       chart.on("dataZoom", () => {
         try {
           const opt = chart.getOption();
           if (opt.dataZoom && opt.dataZoom[0]) {
             zoomRef.current.start = opt.dataZoom[0].start as number;
             zoomRef.current.end = opt.dataZoom[0].end as number;
+            // Sync startVal/endVal from slider
+            const d = dataRef.current;
+            if (d) {
+              const total = d.dates.length - 1;
+              zoomRef.current.startVal = Math.round((opt.dataZoom[0].start as number / 100) * total);
+              zoomRef.current.endVal = Math.round((opt.dataZoom[0].end as number / 100) * total);
+            }
           }
         } catch (_e) { /* noop */ }
-        setTimeout(rebuildAllDrawings, 50);
+        scheduleRebuild();
       });
 
       // Drawing events
@@ -1198,18 +1312,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       document.querySelectorAll(".kt-draw-btn[data-tool]").forEach(b => {
         b.classList.toggle("active", b.getAttribute("data-tool") === tool);
       });
-      // Disable dataZoom when drawing tool active (mobile conflict)
-      const ch = chartRef.current;
-      if (ch) {
-        try {
-          ch.setOption({
-            dataZoom: ch.getOption().dataZoom.map((dz: any) => ({
-              ...dz,
-              disabled: tool !== "cursor",
-            })),
-          });
-        } catch (_e) { /* noop */ }
-      }
+      // Custom zoom/pan handlers already check currentToolRef, no need to disable dataZoom
     }
 
     function undoDrawing() {
@@ -1329,18 +1432,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
     if (tool) {
       currentToolRef.current = tool;
       rootRef.current?.querySelectorAll(".kt-draw-btn[data-tool]").forEach(b => b.classList.toggle("active", b.getAttribute("data-tool") === tool));
-      // Disable dataZoom when drawing tool active (mobile conflict)
-      const ch = chartRef.current;
-      if (ch) {
-        try {
-          ch.setOption({
-            dataZoom: ch.getOption().dataZoom.map((dz: any) => ({
-              ...dz,
-              disabled: tool !== "cursor",
-            })),
-          });
-        } catch (_e) { /* noop */ }
-      }
     }
   }, []);
 
