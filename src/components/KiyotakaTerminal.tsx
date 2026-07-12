@@ -1341,15 +1341,20 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         if (!chart || !d) return;
 
         measureChartWidth();
-        const { start, end } = zoomRef.current;
+        // Read actual dataZoom state from ECharts (not zoomRef, which only updates from manual handlers)
+        const opt = chart.getOption() as any;
+        const dzArray = (opt.dataZoom || []).filter((dz: any) => dz.id === "__kt_inside");
+        const dz = dzArray.length > 0 ? dzArray[0] : null;
+        if (!dz) return;
+        const start = dz.start as number;
+        const end = dz.end as number;
         const visibleRange = (end - start) / 100; // 0..1
         const chartW = chartWidthRef.current;
         const totalBars = d.dates.length - 1;
         const visibleBars = Math.round(visibleRange * totalBars);
         const rawBars = rawBarsRef.current;
 
-        // ── Zoom-in check: fetch finer data if zoomed to < 3% of raw bars ──
-        // Use rawBars (before downsampling) to get accurate zoom ratio
+        // ── Zoom-in check: fetch finer data if zoomed to < 10% of raw bars ──
         const rawTotal = rawBars.length > 0 ? rawBars.length - 1 : totalBars;
         if (rawTotal > 0 && visibleBars / rawTotal < ZOOM_IN_FETCH_PCT) {
           const finer = nextFinerInterval(currentTfRef.current);
@@ -1361,25 +1366,21 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
         // ── Zoom-out check: downsample if bars are too dense ──
         if (rawBars.length > 0 && chartW > 0) {
-          // How many bars can we show without getting too thin?
           const maxBars = Math.floor(chartW / MIN_BAR_WIDTH_PX);
 
           if (totalBars > maxBars && rawBars.length > totalBars) {
-            // We're already showing a subset — raw data has more bars, no action needed
+            // Already showing a subset — no action needed
           } else if (totalBars > maxBars && rawBars.length <= totalBars) {
-            // Current data is too dense — downsample from raw
             const downsampled = adaptiveDownsample(rawBars, maxBars);
             if (downsampled.length < rawBars.length) {
               const data = processBars(downsampled);
               dataRef.current = data;
               chart.setOption(buildOption(), true);
-              // Update zoom indices for new data
               const newTotal = data.dates.length - 1;
               zoomRef.current.startVal = Math.round((start / 100) * newTotal);
               zoomRef.current.endVal = Math.round((end / 100) * newTotal);
             }
           } else if (totalBars <= maxBars && rawBars.length > totalBars) {
-            // We have room to show more — use raw bars (no downsampling needed)
             if (rawBars.length !== totalBars) {
               const data = processBars(rawBars);
               dataRef.current = data;
