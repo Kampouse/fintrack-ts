@@ -1242,13 +1242,11 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         const factor = raw.deltaY > 0 ? 1.1 : 1 / 1.1;
         const newRange = Math.max(2, Math.min(98, range * factor));
 
-        // Get grid rect via coordinate system to compute cursor position accurately
-        let cursorFrac = 0.5;
-        const coordSys = (chart as any).getCoordinateSystems?.();
-        if (coordSys?.[0]?.getRect) {
-          const r = coordSys[0].getRect();
-          cursorFrac = Math.max(0, Math.min(1, (e.offsetX - r.x) / r.width));
-        }
+        // Grid has left:50 right:60 (px). Compute cursor fraction within plot area.
+        const rect = container.getBoundingClientRect();
+        const plotLeft = 50;
+        const plotWidth = rect.width - 50 - 60;
+        const cursorFrac = plotWidth > 0 ? Math.max(0, Math.min(1, (raw.clientX - rect.left - plotLeft) / plotWidth)) : 0.5;
 
         const cursorPct = start + range * cursorFrac;
         let ns = cursorPct - newRange * cursorFrac;
