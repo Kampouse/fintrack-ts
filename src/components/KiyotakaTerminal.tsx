@@ -1479,17 +1479,17 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       // Check if we need finer data (zoom-in only) or to downsample (zoom-out)
       // Update series data WITHOUT touching dataZoom (avoids fighting native zoom)
       const updateSeriesData = (chart: echarts.ECharts, data: any) => {
-        chart.setOption({
-          xAxis: { data: data.dates },
-          series: [
-            { data: data.candles },
-            { data: data.volumes },
-            { data: data.smas },
-            { data: data.ema20s },
-            { data: data.ema50s },
-            { data: data.bbands },
-          ],
-        });
+        // Save current zoom, full-rebuild, restore zoom
+        const opt = chart.getOption() as any;
+        const dzArr = (opt.dataZoom || []).filter((dz: any) => dz.id === "__kt_inside");
+        const dz = dzArr.length > 0 ? dzArr[0] : null;
+        const savedStart = dz ? dz.start : zoomRef.current.start;
+        const savedEnd = dz ? dz.end : zoomRef.current.end;
+        chart.setOption(buildOption(), true);
+        // Restore zoom state
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: savedStart, end: savedEnd }] });
+        zoomRef.current.start = savedStart;
+        zoomRef.current.end = savedEnd;
       };
 
       const checkResolution = () => {
