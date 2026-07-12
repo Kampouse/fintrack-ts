@@ -1288,6 +1288,127 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       zr.on("mouseup", startMomentum);
       container.addEventListener("touchend", startMomentum);
 
+      /* ═══ Panel resize drag handles ═══ */
+      let isResizing = false;
+      let resizePanelAbove: string | null = null;
+      let resizePanelBelow: string | null = null;
+      let resizeStartY = 0;
+      let resizeStartHeights: Record<string, number> = {};
+      let resizeHandleEls: any[] = [];
+
+      const addResizeHandles = () => {
+        // Remove old handles
+        resizeHandleEls.forEach(el => { try { zr.remove(el); } catch (_e) {} });
+        resizeHandleEls = [];
+
+        const { grids, panels } = buildGridLayout();
+        if (grids.length < 2) return;
+
+        const chartH = container.clientHeight;
+        const chartW = container.clientWidth;
+        const gLeft = grids[0].left;
+        const gRight = grids[0].right;
+
+        for (let i = 0; i < grids.length - 1; i++) {
+          const gTop = grids[i];
+          const gBot = grids[i + 1];
+          const yTopPx = (gTop.top + gTop.height) * chartH / 100;
+          const yBotPx = gBot.top * chartH / 100;
+          const midY = (yTopPx + yBotPx) / 2;
+
+          // Invisible grab zone
+          const hitZone = new ZrRect({
+            shape: { x: gLeft - 10, y: midY - RESIZE_ZONE, width: chartW - gLeft - gRight + 20, height: RESIZE_ZONE * 2 },
+            style: { fill: "transparent" },
+            z: 200,
+          });
+          hitZone.cursor = "row-resize";
+          zr.add(hitZone);
+          resizeHandleEls.push(hitZone);
+
+          // Visible separator line
+          const visLine = new ZrLine({
+            shape: { x1: gLeft, y1: midY, x2: chartW - gRight, y2: midY },
+            style: { stroke: "rgba(255,255,255,.08)", lineWidth: 1 },
+            silent: true, z: 199,
+          });
+          zr.add(visLine);
+          resizeHandleEls.push(visLine);
+        }
+      };
+
+      const handleResizeHover = (e: any) => {
+        if (isResizing || currentToolRef.current !== "cursor") return;
+        const { grids, panels } = buildGridLayout();
+        if (grids.length < 2) return;
+        const chartH = container.clientHeight;
+        let nearBoundary = false;
+        for (let i = 0; i < grids.length - 1; i++) {
+          const yTopPx = (grids[i].top + grids[i].height) * chartH / 100;
+          const yBotPx = grids[i + 1].top * chartH / 100;
+          if (Math.abs(e.offsetY - (yTopPx + yBotPx) / 2) < RESIZE_ZONE * 2) {
+            nearBoundary = true; break;
+          }
+        }
+        container.style.cursor = nearBoundary ? "row-resize" : "";
+      };
+
+      const handleResizeStart = (e: any) => {
+        if (isResizing || currentToolRef.current !== "cursor") return;
+        const { grids, panels } = buildGridLayout();
+        if (grids.length < 2) return;
+        const chartH = container.clientHeight;
+        const panelIds = ["main", ...panels];
+        for (let i = 0; i < grids.length - 1; i++) {
+          const yTopPx = (grids[i].top + grids[i].height) * chartH / 100;
+          const yBotPx = grids[i + 1].top * chartH / 100;
+          if (Math.abs(e.offsetY - (yTopPx + yBotPx) / 2) < RESIZE_ZONE * 3) {
+            isResizing = true;
+            resizePanelAbove = panelIds[i];
+            resizePanelBelow = panelIds[i + 1];
+            resizeStartY = e.offsetY;
+            resizeStartHeights = { ...(panelHeightsRef.current as Record<string, number>) };
+            e.stop?.();
+            break;
+          }
+        }
+      };
+
+      const handleResizeEnd = (e: any) => {
+        if (!isResizing) return;
+        const dy = e.offsetY - resizeStartY;
+        const chartH = container.clientHeight;
+        const dPct = (dy / chartH) * 100;
+
+        const ph = panelHeightsRef.current as Record<string, number>;
+        const hAbove = resizeStartHeights[resizePanelAbove!] || ph[resizePanelAbove!];
+        const hBelow = resizeStartHeights[resizePanelBelow!] || ph[resizePanelBelow!];
+        let newAbove = hAbove + dPct;
+        let newBelow = hBelow - dPct;
+
+        if (newAbove < MIN_HEIGHT) { newAbove = MIN_HEIGHT; newBelow = hAbove + hBelow - MIN_HEIGHT; }
+        if (newBelow < MIN_HEIGHT) { newBelow = MIN_HEIGHT; newAbove = hAbove + hBelow - MIN_HEIGHT; }
+
+        ph[resizePanelAbove!] = newAbove;
+        ph[resizePanelBelow!] = newBelow;
+
+        isResizing = false;
+        resizePanelAbove = null;
+        resizePanelBelow = null;
+
+        chart.setOption({ animation: false });
+        chart.setOption(buildOption(), true);
+        chart.setOption({ animation: true, animationDuration: 200 });
+        setTimeout(() => addResizeHandles(), 100);
+      };
+
+      zr.on("mousemove", handleResizeHover);
+      zr.on("mousedown", handleResizeStart);
+      zr.on("mouseup", handleResizeEnd);
+
+      // Add initial handles after first render
+      setTimeout(() => addResizeHandles(), 300);
+
       // ── Adaptive resolution: downsample on zoom-out, fetch on zoom-in ──
       // TF badge managed by React state (setTfDisplay)
 
@@ -1423,6 +1544,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
             chart.setOption(buildOption(), true);
             chart.setOption({ animation: true, animationDuration: 200 });
+            setTimeout(() => addResizeHandles(), 100);
 
             // Update header
             const label = newInterval.toUpperCase() === "1D" ? "1D" : newInterval.toUpperCase();
