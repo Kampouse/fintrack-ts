@@ -402,6 +402,23 @@ const KIYOTAKA_CSS = `
   }
   .kt-tf-btn:hover { color: #aaa; background: rgba(255,255,255,.06); }
   .kt-tf-btn.active { color: #00EC97; background: rgba(0,236,151,.12); border-color: rgba(0,236,151,.25); }
+  .kt-live-btn {
+    font-size: 10px;
+    color: #666;
+    background: rgba(255, 70, 70, .08);
+    border: 1px solid rgba(255, 70, 70, .2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    cursor: pointer;
+    transition: all .15s;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+  .kt-live-btn:hover { color: #ff6666; background: rgba(255, 70, 70, .15); border-color: rgba(255, 70, 70, .35); }
+  .kt-live-btn .kt-live-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #ff4646; margin-right: 3px; animation: kt-pulse 1.5s ease-in-out infinite; }
+  @keyframes kt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   .kt-symbol { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: .3px; }
   .kt-pair-label { font-size: 13px; color: #888; font-weight: 500; }
   .kt-price-block { display: flex; align-items: baseline; gap: 10px; }
@@ -686,6 +703,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   // ── swapToTf: switch to a new timeframe, fetching + updating chart ──
   // This is set inside useEffect but declared here so it can be referenced in deps
   const swapToTfRef = useRef<(interval: TfInterval) => Promise<void>>(() => Promise.resolve());
+  const goLiveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // ── buildGridLayout (from kiyotaka) ──
   const buildGridLayout = useCallback(() => {
@@ -1588,6 +1606,31 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       swapToTfRef.current = swapToTf;
 
+      // ── LIVE button: jump to 15m, show last ~1hr (4 candles) ──
+      const goLive = async () => {
+        const chart = chartRef.current;
+        if (!chart || !mountedRef.current) return;
+        // Switch to 15m if not already
+        if (currentTfRef.current !== "15m") {
+          await swapToTf("15m");
+        }
+        // Zoom to last 4 candles (1hr)
+        setTimeout(() => {
+          const d = dataRef.current;
+          if (!d || !chart) return;
+          const total = d.dates.length - 1;
+          const showBars = 4;
+          const endPct = 100;
+          const startPct = Math.max(0, 100 - (showBars / total) * 100);
+          chart.setOption({ dataZoom: [{ id: "__kt_inside", start: startPct, end: endPct }] });
+          zoomRef.current.start = startPct;
+          zoomRef.current.end = endPct;
+          zoomRef.current.startVal = total - showBars;
+          zoomRef.current.endVal = total;
+        }, 100);
+      };
+      goLiveRef.current = goLive;
+
       // Pinch zoom — handled natively by zrender GestureMgr + ECharts RoamController.
       // We only listen for touchend to trigger resolution check (zoom-in fetch / zoom-out downsample).
       const onResTouchEnd = () => { scheduleResCheck(); };
@@ -1934,6 +1977,9 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
                 onClick={() => swapToTfRef.current(tf)}
               >{tf.toUpperCase()}</button>
             ))}
+            <button className="kt-live-btn" onClick={() => goLiveRef.current()}>
+              <span className="kt-live-dot" />LIVE
+            </button>
           </div>
         </div>
         <div className="kt-price-block">
