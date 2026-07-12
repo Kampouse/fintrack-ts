@@ -1682,8 +1682,8 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       mountedRef.current = false;
       if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = null; }
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-      document.removeEventListener("keydown", onKD);
-      document.removeEventListener("keyup", onKU);
+      if (typeof onKD === "function") document.removeEventListener("keydown", onKD);
+      if (typeof onKU === "function") document.removeEventListener("keyup", onKU);
       const chart = chartRef.current;
       if (chart) {
         const c = chartContainerRef.current;
