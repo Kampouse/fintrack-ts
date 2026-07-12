@@ -544,7 +544,7 @@ const KIYOTAKA_CSS = `
   }
 
   /* Chart area */
-  .kt-chart { flex: 1; position: relative; min-width: 0; }
+  .kt-chart { flex: 1; position: relative; min-width: 0; touch-action: none; }
 
   /* Drawing Toolbar */
   .kt-draw-toolbar {
@@ -996,6 +996,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           xAxisIndex: allIdx,
           start: zoomRef.current.start,
           end: zoomRef.current.end,
+          zoomOnMouseWheel: true,
         },
         {
           type: "slider", xAxisIndex: allIdx, bottom: 4, height: 20,
