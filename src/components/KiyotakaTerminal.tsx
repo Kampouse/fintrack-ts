@@ -1005,6 +1005,9 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       chart.setOption(option, true);
       chart.setOption({ animation: true, animationDuration: 400 });
 
+      // Get zrender instance — needed by zoom/pan AND drawing handlers
+      const zr = chart.getZr();
+
       // ── Custom zoom & pan (bypasses clunky dataZoom inside) ──
       const ZOOM_SENSITIVITY = 0.002;   // radians per pixel of wheel delta
       const MIN_VISIBLE = 10;           // minimum visible candles
@@ -1128,7 +1131,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       });
 
       // Drawing events
-      const zr = chart.getZr();
       const getPos = (e: MouseEvent | TouchEvent) => {
         // zrender wraps DOM events — use e.event to access original DOM event
         const raw = (e as any).event || e;
