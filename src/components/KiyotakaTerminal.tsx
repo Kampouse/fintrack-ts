@@ -1378,6 +1378,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           zoomRef.current.endVal = Math.round((ne / 100) * total);
         }
         scheduleRebuild();
+        scheduleTfCheck();
       };
       const onTouchPinchEnd = () => { pinchStartData = null; };
       container.addEventListener("touchstart", onTouchPinchStart, { passive: false });
