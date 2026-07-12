@@ -652,6 +652,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
     const allIdx = grids.map((_, i) => i);
 
     // xAxis
+    const isSubDaily = currentTfRef.current !== "1d";
     const xAxis: echarts.XAXisComponentOption[] = grids.map((g, i) => ({
       type: "category" as const,
       data: d.dates,
@@ -662,6 +663,20 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         show: i === 0 || i === grids.length - 1,
         color: AXIS_LABEL,
         fontSize: 10,
+        formatter: isSubDaily
+          ? (val: string) => {
+              // "2026-07-08 14:00" → "14:00", show date on first bar or day boundary
+              const parts = val.split(" ");
+              if (parts.length === 2) return parts[1]; // HH:MM
+              return val;
+            }
+          : (val: string) => {
+              // "2026-07-08" → "Jul 8"
+              const d = new Date(val + "T00:00:00Z");
+              const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+              return months[d.getUTCMonth()] + " " + d.getUTCDate();
+            },
+        interval: isSubDaily ? Math.max(0, Math.floor(d.dates.length / 12)) : "auto" as any,
       },
       splitLine: { show: false },
       gridIndex: i,
