@@ -1800,7 +1800,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       // Auto-refresh every 5s
       refreshTimerRef.current = setInterval(async () => {
         if (!mountedRef.current) return;
-        const newBars = await fetchKlines(binSymbol);
+        const newBars = await fetchKlines(binSymbol, currentTfRef.current);
         if (!mountedRef.current || !newBars.length) return;
         // Re-derive all data
         const newDates: string[] = [];
