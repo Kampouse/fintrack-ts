@@ -184,21 +184,50 @@ function calcHeikinAshi(ohlc: number[][]): number[][] {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Data fetcher
+   Data fetcher — supports multiple intervals
    ═══════════════════════════════════════════════════════════════ */
 
-async function fetchKlines(symbol: string): Promise<ParsedBar[]> {
+type TfInterval = "1d" | "4h" | "1h" | "15m";
+
+interface TfTier {
+  interval: TfInterval;
+  label: string;
+  // Downgrade when visible bars < threshold
+  downAt: number;
+  // Upgrade when visible bars > threshold (higher = more tolerant, prevents flicker)
+  upAt: number;
+}
+
+const TF_TIERS: TfTier[] = [
+  { interval: "1d",  label: "1D",  downAt: 20,  upAt: 30 },
+  { interval: "4h",  label: "4H",  downAt: 40,  upAt: 60 },
+  { interval: "1h",  label: "1H",  downAt: 60,  upAt: 100 },
+  { interval: "15m", label: "15m", downAt: 0,   upAt: 999 }, // finest, never downgrades
+];
+
+function getTierForBars(visibleBars: number): TfTier {
+  for (const tier of TF_TIERS) {
+    if (visibleBars >= tier.downAt && visibleBars < tier.upAt) return tier;
+  }
+  return TF_TIERS[0];
+}
+
+function tierIndex(interval: TfInterval): number {
+  return TF_TIERS.findIndex(t => t.interval === interval);
+}
+
+async function fetchKlines(symbol: string, interval: TfInterval = "1d", startTime?: number, endTime?: number): Promise<ParsedBar[]> {
   const binanceSymbol = symbol.replace("BINANCE:", "");
-  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=1d&limit=365`;
+  let url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=${interval}&limit=1000`;
+  if (startTime) url += `&startTime=${startTime}`;
+  if (endTime) url += `&endTime=${endTime}`;
   const res = await fetch(url);
   if (!res.ok) return [];
   const raw: unknown[][] = await res.json();
   if (!raw?.length) return [];
 
   const bars: ParsedBar[] = [];
-  const bullMarkers: number[][] = [];
-  const bearMarkers: number[][] = [];
-  let momentumCount = 0;
+  const isSubDaily = interval !== "1d";
 
   for (const row of raw) {
     const d = row[0] as number;
@@ -207,7 +236,10 @@ async function fetchKlines(symbol: string): Promise<ParsedBar[]> {
     const l = +(row[3]);
     const c = +(row[4]);
     const v = +(row[5]);
-    const dateStr = new Date(d).toISOString().slice(0, 10);
+    // Sub-daily: show time, daily: show date
+    const dateStr = isSubDaily
+      ? new Date(d).toISOString().slice(0, 16).replace("T", " ")
+      : new Date(d).toISOString().slice(0, 10);
     const body = Math.abs(c - o);
     const range = h - l;
     const ratio = range > 0 ? body / range : 0;
@@ -275,6 +307,18 @@ const KIYOTAKA_CSS = `
   .kt-sidebar-toggle svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
 
   .kt-symbol-badge { display: flex; align-items: baseline; gap: 8px; }
+  .kt-tf-badge {
+    font-size: 11px;
+    color: #00EC97;
+    background: rgba(0, 236, 151, .12);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    flex-shrink: 0;
+    transition: all .2s;
+  }
+  .kt-tf-val { /* text set by JS */ }
   .kt-symbol { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: .3px; }
   .kt-pair-label { font-size: 13px; color: #888; font-weight: 500; }
   .kt-price-block { display: flex; align-items: baseline; gap: 10px; }
@@ -495,6 +539,10 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   } | null>(null);
   const panelHeightsRef = useRef({ main: 72, volume: 9, bodyRatio: 9, rsi: 12, macd: 12 });
   const zoomRef = useRef({ start: 60, end: 100, startVal: 0, endVal: 0 });
+  const currentTfRef = useRef<TfInterval>("1d"); // current timeframe
+  const tfCacheRef = useRef<Map<string, ParsedBar[]>>(new Map()); // cache per interval
+  const tfFetchRef = useRef<Promise<void> | null>(null); // dedup in-flight fetches
+  const binSymbolRef = useRef("");
   const drawingsRef = useRef<unknown[]>([]);
   const currentToolRef = useRef("cursor");
   const isDrawingRef = useRef(false);
@@ -514,6 +562,44 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   const getBinanceSymbol = useCallback(() => {
     return symbol.replace("BINANCE:", "");
   }, [symbol]);
+
+  // ── processBars: convert ParsedBar[] into dataRef shape ──
+  const processBars = useCallback((bars: ParsedBar[]) => {
+    const dates: string[] = [];
+    const ohlc: number[][] = [];
+    const volumes: number[] = [];
+    const bodyRatios: number[] = [];
+    const bullMarkers: number[][] = [];
+    const bearMarkers: number[][] = [];
+    let momentumCount = 0;
+    for (const b of bars) {
+      dates.push(b.date);
+      ohlc.push(b.ohlc);
+      volumes.push(b.volume);
+      bodyRatios.push(b.bodyRatio);
+      if (b.bodyRatio >= 85) {
+        momentumCount++;
+        if (b.ohlc[1] > b.ohlc[0]) bullMarkers.push([dates.length - 1, b.ohlc[2]]);
+        else bearMarkers.push([dates.length - 1, b.ohlc[3]]);
+      }
+    }
+    const closePrices = ohlc.map(c => c[1]);
+    return {
+      bars, dates, ohlc, volumes, bodyRatios, closePrices,
+      bullMarkers, bearMarkers, momentumCount,
+      smaData: calcSMA(closePrices, 20),
+      emaData: calcEMA(closePrices, 20),
+      bb: calcBollinger(closePrices, 20, 2),
+      vwapData: calcVWAP(ohlc, volumes),
+      rsiData: calcRSI(closePrices, 14),
+      macd: calcMACD(closePrices, 12, 26, 9),
+      heikinAshiOHLC: calcHeikinAshi(ohlc),
+    };
+  }, []);
+
+  // ── swapToTf: switch to a new timeframe, fetching + updating chart ──
+  // This is set inside useEffect but declared here so it can be referenced in deps
+  const swapToTfRef = useRef<(interval: TfInterval) => Promise<void>>(() => Promise.resolve());
 
   // ── buildGridLayout (from kiyotaka) ──
   const buildGridLayout = useCallback(() => {
@@ -958,47 +1044,23 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
     async function init() {
       const binSymbol = getBinanceSymbol();
-      const bars = await fetchKlines(binSymbol);
+      binSymbolRef.current = binSymbol;
+      currentTfRef.current = "1d";
+
+      const bars = await fetchKlines(binSymbol, "1d");
       if (!mountedRef.current || !container || cancelled) return;
       if (!bars.length) {
         container.innerHTML = '<div class="kt-loader">No data</div>';
         return;
       }
 
-      const dates: string[] = [];
-      const ohlc: number[][] = [];
-      const volumes: number[] = [];
-      const bodyRatios: number[] = [];
-      const bullMarkers: number[][] = [];
-      const bearMarkers: number[][] = [];
-      let momentumCount = 0;
+      // Cache initial data
+      tfCacheRef.current.set("1d", bars);
 
-      for (const b of bars) {
-        dates.push(b.date);
-        ohlc.push(b.ohlc);
-        volumes.push(b.volume);
-        bodyRatios.push(b.bodyRatio);
-        if (b.bodyRatio >= 85) {
-          momentumCount++;
-          if (b.ohlc[1] > b.ohlc[0]) bullMarkers.push([dates.length - 1, b.ohlc[2]]);
-          else bearMarkers.push([dates.length - 1, b.ohlc[3]]);
-        }
-      }
-
-      const closePrices = ohlc.map(c => c[1]);
-      const smaData = calcSMA(closePrices, 20);
-      const emaData = calcEMA(closePrices, 20);
-      const bb = calcBollinger(closePrices, 20, 2);
-      const vwapData = calcVWAP(ohlc, volumes);
-      const rsiData = calcRSI(closePrices, 14);
-      const macd = calcMACD(closePrices, 12, 26, 9);
-      const heikinAshiOHLC = calcHeikinAshi(ohlc);
-
-      dataRef.current = {
-        bars, dates, ohlc, volumes, bodyRatios, closePrices,
-        bullMarkers, bearMarkers, momentumCount,
-        smaData, emaData, bb, vwapData, rsiData, macd, heikinAshiOHLC,
-      };
+      // Process bars into dataRef shape
+      const data = processBars(bars);
+      dataRef.current = data;
+      const { dates, ohlc, volumes, momentumCount } = data;
 
       // Initialize zoom range as data indices
       const totalBars = dates.length - 1;
@@ -1150,6 +1212,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           }
         } catch (_e) { /* noop */ }
         scheduleRebuild();
+        scheduleTfCheck(); // check if we need to switch timeframe
       });
 
       // Start momentum on mouseup/touchend (when pan was happening)
@@ -1161,6 +1224,120 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       };
       zr.on("mouseup", startMomentum);
       container.addEventListener("touchend", startMomentum);
+
+      // ── Progressive resolution: auto-switch timeframe on zoom ──
+      const tfBadge = rootRef.current?.querySelector(".kt-tf-val");
+      const updateTfBadge = (label: string) => { if (tfBadge) tfBadge.textContent = label; };
+      updateTfBadge("1D");
+
+      const checkTfSwap = () => {
+        const chart = chartRef.current;
+        const d = dataRef.current;
+        if (!chart || !d) return;
+        const { start, end } = zoomRef.current;
+        const visibleBars = Math.round(((end - start) / 100) * (d.dates.length - 1));
+        const currentTier = getTierForBars(visibleBars);
+        const currentIdx = tierIndex(currentTfRef.current);
+
+        if (currentTier.interval !== currentTfRef.current) {
+          const targetIdx = tierIndex(currentTier.interval);
+          // Only swap if going deeper (zoom in) OR if significantly zoomed out
+          if (targetIdx > currentIdx) {
+            swapToTf(currentTier.interval);
+          } else if (targetIdx < currentIdx && visibleBars >= TF_TIERS[currentIdx].upAt) {
+            swapToTf(currentTier.interval);
+          }
+        }
+      };
+
+      // Debounce TF checks to avoid rapid swapping during momentum
+      const tfCheckTimer = { id: null as ReturnType<typeof setTimeout> | null };
+      const scheduleTfCheck = () => {
+        if (tfCheckTimer.id) clearTimeout(tfCheckTimer.id);
+        tfCheckTimer.id = setTimeout(checkTfSwap, 300);
+      };
+
+      const swapToTf = async (newInterval: TfInterval) => {
+        const chart = chartRef.current;
+        if (!chart || !mountedRef.current) return;
+
+        // Dedup: skip if already fetching
+        if (tfFetchRef.current) return;
+        const fetchPromise = (async () => {
+          try {
+            // Check cache first
+            let bars = tfCacheRef.current.get(newInterval);
+            if (!bars) {
+              // Fetch data for this interval
+              const d = dataRef.current;
+              if (!d || !d.bars.length) return;
+              // Use visible date range from current data to set start/end time
+              const firstBar = d.bars[0];
+              const lastBar = d.bars[d.bars.length - 1];
+              // Parse dates back to timestamps for the API
+              // For daily data: "2026-07-08" → ms. For sub-daily: "2026-07-08 14:00" → ms
+              const startMs = new Date(firstBar.date + (newInterval === "1d" ? "T00:00:00Z" : "Z")).getTime();
+              const endMs = new Date(lastBar.date + (newInterval === "1d" ? "T23:59:59Z" : "Z")).getTime();
+              // Add padding: fetch extra 50% on each side
+              const range = endMs - startMs;
+              bars = await fetchKlines(binSymbolRef.current, newInterval, Math.max(0, startMs - range * 0.5), endMs + range * 0.5);
+              if (!bars.length) return;
+              tfCacheRef.current.set(newInterval, bars);
+            }
+
+            if (!mountedRef.current || !chart) return;
+
+            // Process and swap
+            const data = processBars(bars);
+            dataRef.current = data;
+            currentTfRef.current = newInterval;
+
+            // Rebuild chart with new data, keep zoom position
+            chart.setOption(buildOption(), true);
+            chart.setOption({ animation: true, animationDuration: 300 });
+
+            // Update header
+            const tier = TF_TIERS.find(t => t.interval === newInterval);
+            updateTfBadge(tier?.label || newInterval);
+            const { ohlc } = data;
+            const lastCandle = ohlc[ohlc.length - 1];
+            const prevClose = ohlc.length >= 2 ? ohlc[ohlc.length - 2][1] : lastCandle[0];
+            const price = lastCandle[1];
+            const pctChange = ((price - prevClose) / prevClose * 100);
+            const isUp = pctChange >= 0;
+            const priceEl = rootRef.current?.querySelector(".kt-price-val");
+            const changeEl = rootRef.current?.querySelector(".kt-change-val");
+            const highEl = rootRef.current?.querySelector(".kt-high-val");
+            const lowEl = rootRef.current?.querySelector(".kt-low-val");
+            const volEl = rootRef.current?.querySelector(".kt-vol-val");
+            if (priceEl) priceEl.textContent = price.toFixed(2);
+            if (changeEl) {
+              changeEl.textContent = (isUp ? "+" : "") + pctChange.toFixed(2) + "%";
+              changeEl.className = "kt-change kt-change-val " + (isUp ? "up" : "down");
+            }
+            if (highEl) highEl.textContent = Math.max(...ohlc.map(c => c[3])).toFixed(2);
+            if (lowEl) lowEl.textContent = Math.min(...ohlc.map(c => c[2])).toFixed(2);
+            if (volEl) volEl.textContent = data.volumes[data.volumes.length - 1].toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+            // Clear drawings that don't match new timeframe
+            drawingsRef.current = [];
+            syncGraphics();
+
+            // Re-init zoom to see all bars
+            const totalBars = data.dates.length - 1;
+            zoomRef.current.start = 0;
+            zoomRef.current.end = 100;
+            zoomRef.current.startVal = 0;
+            zoomRef.current.endVal = totalBars;
+            chart.setOption({ dataZoom: [{ id: "__kt_inside", start: 0, end: 100 }] });
+          } catch (_e) { /* noop */ }
+          tfFetchRef.current = null;
+        })();
+        tfFetchRef.current = fetchPromise;
+        await fetchPromise;
+      };
+
+      swapToTfRef.current = swapToTf;
 
       // Manual pinch zoom (zrender v6 doesn't dispatch pinch events)
       let pinchStartData: { start: number; end: number; dist: number } | null = null;
@@ -1537,6 +1714,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         <div className="kt-symbol-badge">
           <span className="kt-symbol">{displaySymbol}</span>
           <span className="kt-pair-label">/ USDT</span>
+          <span className="kt-tf-badge"><span className="kt-tf-val">1D</span></span>
         </div>
         <div className="kt-price-block">
           <span className="kt-price kt-price-val">—</span>
