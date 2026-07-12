@@ -186,34 +186,110 @@ function calcHeikinAshi(ohlc: number[][]): number[][] {
 /* ═══════════════════════════════════════════════════════════════
    Data fetcher — supports multiple intervals
    ═══════════════════════════════════════════════════════════════ */
+/* ── Downsample algorithms (from kiyotaka renderer) ── */
 
+// minmaxDownSample: merge N bars into 1, preserving OHLC wicks
+function minmaxDownSample(bars: ParsedBar[], factor: number): ParsedBar[] {
+  if (factor <= 1 || bars.length <= 1) return bars;
+  const out: ParsedBar[] = [];
+  const bucketSize = Math.max(1, Math.round(factor));
+  for (let i = 0; i < bars.length; i += bucketSize) {
+    const end = Math.min(i + bucketSize, bars.length);
+    let o = bars[i].ohlc[0], c = bars[end - 1].ohlc[1];
+    let h = -Infinity, l = Infinity;
+    let vol = 0;
+    for (let j = i; j < end; j++) {
+      if (bars[j].ohlc[3] > h) h = bars[j].ohlc[3];
+      if (bars[j].ohlc[2] < l) l = bars[j].ohlc[2];
+      vol += bars[j].volume;
+    }
+    out.push({
+      date: bars[i].date,
+      ohlc: [o, c, l, h],
+      volume: vol,
+      bodyRatio: +((Math.abs(c - o) / (h - l || 1)) * 100).toFixed(1),
+    });
+  }
+  return out;
+}
+
+// ltbDownSample: Largest Triangle Three Buckets — visually accurate decimation
+function lttbDownSample(bars: ParsedBar[], targetCount: number): ParsedBar[] {
+  if (targetCount >= bars.length || bars.length <= 3) return bars;
+  const n = bars.length;
+  // Use close price as the Y value for area calculation
+  const dataX: number[] = [];
+  const dataY: number[] = [];
+  for (let i = 0; i < n; i++) {
+    dataX.push(i);
+    dataY.push(bars[i].ohlc[1]); // close
+  }
+
+  const sampled: ParsedBar[] = [];
+  sampled.push(bars[0]); // Always keep first
+
+  // Bucket size (each bucket = one output point)
+  const bucketSize = (n - 2) / (targetCount - 2);
+
+  let a = 0; // Previous selected point index
+  for (let i = 0; i < targetCount - 2; i++) {
+    const bucketStart = Math.floor((i + 1) * bucketSize) + 1;
+    const bucketEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, n);
+    const bucketMid = Math.floor((bucketStart + bucketEnd) / 2);
+
+    // Calculate average Y of next bucket (for triangle area)
+    const nextBucketStart = bucketEnd;
+    const nextBucketEnd = Math.min(Math.floor((i + 3) * bucketSize) + 1, n);
+    let avgY = 0, avgCount = 0;
+    for (let j = nextBucketStart; j < nextBucketEnd; j++) {
+      avgY += dataY[j]; avgCount++;
+    }
+    if (avgCount === 0) avgY = dataY[bucketMid];
+    else avgY /= avgCount;
+
+    // Find point in current bucket with max triangle area
+    let maxArea = -1, maxIdx = bucketStart;
+    for (let j = bucketStart; j < bucketEnd; j++) {
+      const area = Math.abs(
+        (dataX[a] - dataX[j]) * (avgY - dataY[a]) -
+        (dataX[a] - dataX[bucketMid]) * (dataY[j] - dataY[a])
+      ) * 0.5;
+      if (area > maxArea) { maxArea = area; maxIdx = j; }
+    }
+    sampled.push(bars[maxIdx]);
+    a = maxIdx;
+  }
+
+  sampled.push(bars[n - 1]); // Always keep last
+  return sampled;
+}
+
+// Adaptive downsampling: pick the best algorithm based on factor
+function adaptiveDownsample(bars: ParsedBar[], targetBars: number): ParsedBar[] {
+  if (targetBars >= bars.length) return bars;
+  const factor = bars.length / targetBars;
+  // For moderate downsampling (2-8x), minmax preserves wicks better
+  // For extreme downsampling (>8x), lttb is more visually accurate
+  if (factor <= 8) return minmaxDownSample(bars, factor);
+  return lttbDownSample(bars, targetBars);
+}
+
+// Bar width target: bars per pixel at which candles start looking like lines
+const MIN_BAR_WIDTH_PX = 3; // at least 3px per candle
+
+// TfInterval type for finer-grained fetch
 type TfInterval = "1d" | "4h" | "1h" | "15m";
 
-interface TfTier {
-  interval: TfInterval;
-  label: string;
-  // Downgrade when visible bars < threshold
-  downAt: number;
-  // Upgrade when visible bars > threshold (higher = more tolerant, prevents flicker)
-  upAt: number;
-}
+// Zoom-in: fetch finer data when visible bars < 10% of total available
+// ~36 bars on 365 daily candles — user can clearly see individual candles
+const ZOOM_IN_FETCH_PCT = 0.10;
 
-const TF_TIERS: TfTier[] = [
-  { interval: "1d",  label: "1D",  downAt: 0,   upAt: 60 },  // zoomed out: 60+ bars visible → 1D
-  { interval: "4h",  label: "4H",  downAt: 30,  upAt: 40 }, // medium zoom: 30-39 bars → 4H
-  { interval: "1h",  label: "1H",  downAt: 15,  upAt: 25 }, // zoomed in: 15-24 bars → 1H
-  { interval: "15m", label: "15m", downAt: 0,   upAt: 15 }, // most zoomed in: <15 bars → 15m
-];
+// Tier order for zoom-in upgrades: 1d → 4h → 1h → 15m
+const TF_ZOOM_IN_ORDER: TfInterval[] = ["1d", "4h", "1h", "15m"];
 
-function getTierForBars(visibleBars: number): TfTier {
-  for (const tier of TF_TIERS) {
-    if (visibleBars >= tier.downAt && visibleBars < tier.upAt) return tier;
-  }
-  return TF_TIERS[0];
-}
-
-function tierIndex(interval: TfInterval): number {
-  return TF_TIERS.findIndex(t => t.interval === interval);
+function nextFinerInterval(current: TfInterval): TfInterval | null {
+  const idx = TF_ZOOM_IN_ORDER.indexOf(current);
+  return idx < TF_ZOOM_IN_ORDER.length - 1 ? TF_ZOOM_IN_ORDER[idx + 1] : null;
 }
 
 async function fetchKlines(symbol: string, interval: TfInterval = "1d", startTime?: number, endTime?: number): Promise<ParsedBar[]> {
@@ -540,8 +616,10 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   const panelHeightsRef = useRef({ main: 72, volume: 9, bodyRatio: 9, rsi: 12, macd: 12 });
   const zoomRef = useRef({ start: 60, end: 100, startVal: 0, endVal: 0 });
   const currentTfRef = useRef<TfInterval>("1d"); // current timeframe
+  const rawBarsRef = useRef<ParsedBar[]>([]); // raw bars before downsampling
   const tfCacheRef = useRef<Map<string, ParsedBar[]>>(new Map()); // cache per interval
   const tfFetchRef = useRef<Promise<void> | null>(null); // dedup in-flight fetches
+  const chartWidthRef = useRef(0); // chart pixel width for downsampling calc
   const binSymbolRef = useRef("");
   const drawingsRef = useRef<unknown[]>([]);
   const currentToolRef = useRef("cursor");
@@ -1071,6 +1149,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       // Cache initial data
       tfCacheRef.current.set("1d", bars);
+      rawBarsRef.current = bars; // store raw bars for downsampling
 
       // Process bars into dataRef shape
       const data = processBars(bars);
@@ -1227,7 +1306,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           }
         } catch (_e) { /* noop */ }
         scheduleRebuild();
-        scheduleTfCheck(); // check if we need to switch timeframe
+        scheduleResCheck(); // adaptive downsample/fetch check
       });
 
       // Start momentum on mouseup/touchend (when pan was happening)
@@ -1240,51 +1319,101 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       zr.on("mouseup", startMomentum);
       container.addEventListener("touchend", startMomentum);
 
-      // ── Progressive resolution: auto-switch timeframe on zoom ──
+      // ── Adaptive resolution: downsample on zoom-out, fetch on zoom-in ──
       const tfBadge = rootRef.current?.querySelector(".kt-tf-val");
       const updateTfBadge = (label: string) => { if (tfBadge) tfBadge.textContent = label; };
       updateTfBadge("1D");
 
-      const checkTfSwap = () => {
+      // Measure chart width for downsampling calc
+      const measureChartWidth = () => {
+        try {
+          const rect = container.getBoundingClientRect();
+          chartWidthRef.current = Math.max(100, rect.width - 110); // minus left/right grid padding
+        } catch (_e) { /* noop */ }
+      };
+      measureChartWidth();
+      window.addEventListener("resize", measureChartWidth);
+
+      // Check if we need finer data (zoom-in only) or to downsample (zoom-out)
+      const checkResolution = () => {
+        const chart = chartRef.current;
         const d = dataRef.current;
-        if (!d) return;
+        if (!chart || !d) return;
+
+        measureChartWidth();
         const { start, end } = zoomRef.current;
-        const visibleBars = Math.round(((end - start) / 100) * (d.dates.length - 1));
-        const targetTier = getTierForBars(visibleBars);
-        if (targetTier.interval !== currentTfRef.current) {
-          swapToTf(targetTier.interval);
+        const visibleRange = (end - start) / 100; // 0..1
+        const chartW = chartWidthRef.current;
+        const totalBars = d.dates.length - 1;
+        const visibleBars = Math.round(visibleRange * totalBars);
+        const rawBars = rawBarsRef.current;
+
+        // ── Zoom-in check: fetch finer data if zoomed to < 3% of raw bars ──
+        // Use rawBars (before downsampling) to get accurate zoom ratio
+        const rawTotal = rawBars.length > 0 ? rawBars.length - 1 : totalBars;
+        if (rawTotal > 0 && visibleBars / rawTotal < ZOOM_IN_FETCH_PCT) {
+          const finer = nextFinerInterval(currentTfRef.current);
+          if (finer) {
+            swapToTf(finer);
+            return;
+          }
+        }
+
+        // ── Zoom-out check: downsample if bars are too dense ──
+        if (rawBars.length > 0 && chartW > 0) {
+          // How many bars can we show without getting too thin?
+          const maxBars = Math.floor(chartW / MIN_BAR_WIDTH_PX);
+
+          if (totalBars > maxBars && rawBars.length > totalBars) {
+            // We're already showing a subset — raw data has more bars, no action needed
+          } else if (totalBars > maxBars && rawBars.length <= totalBars) {
+            // Current data is too dense — downsample from raw
+            const downsampled = adaptiveDownsample(rawBars, maxBars);
+            if (downsampled.length < rawBars.length) {
+              const data = processBars(downsampled);
+              dataRef.current = data;
+              chart.setOption(buildOption(), true);
+              // Update zoom indices for new data
+              const newTotal = data.dates.length - 1;
+              zoomRef.current.startVal = Math.round((start / 100) * newTotal);
+              zoomRef.current.endVal = Math.round((end / 100) * newTotal);
+            }
+          } else if (totalBars <= maxBars && rawBars.length > totalBars) {
+            // We have room to show more — use raw bars (no downsampling needed)
+            if (rawBars.length !== totalBars) {
+              const data = processBars(rawBars);
+              dataRef.current = data;
+              chart.setOption(buildOption(), true);
+              const newTotal = data.dates.length - 1;
+              zoomRef.current.startVal = Math.round((start / 100) * newTotal);
+              zoomRef.current.endVal = Math.round((end / 100) * newTotal);
+            }
+          }
         }
       };
 
-      // Debounce TF checks to avoid rapid swapping during momentum
-      const tfCheckTimer = { id: null as ReturnType<typeof setTimeout> | null };
-      const scheduleTfCheck = () => {
-        if (tfCheckTimer.id) clearTimeout(tfCheckTimer.id);
-        tfCheckTimer.id = setTimeout(checkTfSwap, 300);
+      // Debounce resolution checks
+      const resCheckTimer = { id: null as ReturnType<typeof setTimeout> | null };
+      const scheduleResCheck = () => {
+        if (resCheckTimer.id) clearTimeout(resCheckTimer.id);
+        resCheckTimer.id = setTimeout(checkResolution, 200);
       };
 
       const swapToTf = async (newInterval: TfInterval) => {
         const chart = chartRef.current;
         if (!chart || !mountedRef.current) return;
 
-        // Dedup: skip if already fetching
         if (tfFetchRef.current) return;
         const fetchPromise = (async () => {
           try {
-            // Check cache first
             let bars = tfCacheRef.current.get(newInterval);
             if (!bars) {
-              // Fetch data for this interval
               const d = dataRef.current;
               if (!d || !d.bars.length) return;
-              // Use visible date range from current data to set start/end time
               const firstBar = d.bars[0];
               const lastBar = d.bars[d.bars.length - 1];
-              // Parse dates back to timestamps for the API
-              // For daily data: "2026-07-08" → ms. For sub-daily: "2026-07-08 14:00" → ms
               const startMs = new Date(firstBar.date + (newInterval === "1d" ? "T00:00:00Z" : "Z")).getTime();
               const endMs = new Date(lastBar.date + (newInterval === "1d" ? "T23:59:59Z" : "Z")).getTime();
-              // Add padding: fetch extra 50% on each side
               const range = endMs - startMs;
               bars = await fetchKlines(binSymbolRef.current, newInterval, Math.max(0, startMs - range * 0.5), endMs + range * 0.5);
               if (!bars.length) return;
@@ -1293,18 +1422,27 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
             if (!mountedRef.current || !chart) return;
 
-            // Process and swap
-            const data = processBars(bars);
-            dataRef.current = data;
             currentTfRef.current = newInterval;
+            rawBarsRef.current = bars;
 
-            // Rebuild chart with new data, keep zoom position
+            // Downsample if needed based on current zoom
+            measureChartWidth();
+            const { start, end } = zoomRef.current;
+            const visibleRange = (end - start) / 100;
+            const totalAvailable = bars.length - 1;
+            const visibleBars = Math.round(visibleRange * totalAvailable);
+            const maxBars = chartWidthRef.current > 0 ? Math.floor(chartWidthRef.current / MIN_BAR_WIDTH_PX) : totalAvailable;
+
+            const displayBars = totalAvailable > maxBars ? adaptiveDownsample(bars, maxBars) : bars;
+            const data = processBars(displayBars);
+            dataRef.current = data;
+
             chart.setOption(buildOption(), true);
-            chart.setOption({ animation: true, animationDuration: 300 });
+            chart.setOption({ animation: true, animationDuration: 200 });
 
             // Update header
-            const tier = TF_TIERS.find(t => t.interval === newInterval);
-            updateTfBadge(tier?.label || newInterval);
+            const label = newInterval.toUpperCase() === "1D" ? "1D" : newInterval.toUpperCase();
+            updateTfBadge(label);
             const { ohlc } = data;
             const lastCandle = ohlc[ohlc.length - 1];
             const prevClose = ohlc.length >= 2 ? ohlc[ohlc.length - 2][1] : lastCandle[0];
@@ -1325,16 +1463,15 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
             if (lowEl) lowEl.textContent = Math.min(...ohlc.map(c => c[2])).toFixed(2);
             if (volEl) volEl.textContent = data.volumes[data.volumes.length - 1].toLocaleString(undefined, { maximumFractionDigits: 0 });
 
-            // Clear drawings that don't match new timeframe
             drawingsRef.current = [];
             syncGraphics();
 
-            // Re-init zoom to see all bars
-            const totalBars = data.dates.length - 1;
+            // Reset zoom to show all new bars
+            const newTotal = data.dates.length - 1;
             zoomRef.current.start = 0;
             zoomRef.current.end = 100;
             zoomRef.current.startVal = 0;
-            zoomRef.current.endVal = totalBars;
+            zoomRef.current.endVal = newTotal;
             chart.setOption({ dataZoom: [{ id: "__kt_inside", start: 0, end: 100 }] });
           } catch (_e) { /* noop */ }
           tfFetchRef.current = null;
@@ -1378,7 +1515,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           zoomRef.current.endVal = Math.round((ne / 100) * total);
         }
         scheduleRebuild();
-        scheduleTfCheck();
+        scheduleResCheck();
       };
       const onTouchPinchEnd = () => { pinchStartData = null; };
       container.addEventListener("touchstart", onTouchPinchStart, { passive: false });
