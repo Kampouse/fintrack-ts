@@ -1831,9 +1831,9 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           heikinAshiOHLC: calcHeikinAshi(newOhlc),
         };
         setTimeout(() => rebuildAllDrawings, 150);
-        const opt = buildOption();
-        chart.setOption(opt, true);
-        chart.setOption({ animation: true, animationDuration: 400 });
+        // Merge-mode update: preserve current dataZoom state (don't reset zoom)
+        updateSeriesData(chart, dataRef.current);
+        chart.setOption({ animation: true, animationDuration: 200 });
         syncGraphics();
 
         // Update header
