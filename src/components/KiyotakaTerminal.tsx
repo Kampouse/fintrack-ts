@@ -1473,8 +1473,8 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
 
       // Pinch zoom — handled natively by zrender GestureMgr + ECharts RoamController.
       // We only listen for touchend to trigger resolution check (zoom-in fetch / zoom-out downsample).
-      const onTouchEnd = () => { scheduleResCheck(); };
-      container.addEventListener("touchend", onTouchEnd, { passive: true });
+      const onResTouchEnd = () => { scheduleResCheck(); };
+      container.addEventListener("touchend", onResTouchEnd, { passive: true });
 
       // Drawing events
       const getPos = (e: MouseEvent | TouchEvent) => {
