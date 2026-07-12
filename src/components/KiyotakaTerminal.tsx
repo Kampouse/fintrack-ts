@@ -42,7 +42,7 @@ const GREEN = "#00EC97";
 const RED = "#FF4D4D";
 const BG = "#0f0f11";
 const GRID = "rgba(255,255,255,.04)";
-const AXIS_LABEL = "#555";
+const AXIS_LABEL = "#777";
 const MOMENTUM_THRESHOLD = 0.85;
 const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif";
 
@@ -593,6 +593,15 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         axisTick: { show: false },
         axisLabel: { color: AXIS_LABEL, fontSize: 10 },
         splitLine: { lineStyle: { color: GRID } },
+        // Auto-scale: fit visible candles with padding (KT-03)
+        min: (value: { min: number; max: number }) => {
+          const pad = (value.max - value.min) * 0.05 || 1;
+          return +(value.min - pad).toFixed(2);
+        },
+        max: (value: { min: number; max: number }) => {
+          const pad = (value.max - value.min) * 0.05 || 1;
+          return +(value.max + pad).toFixed(2);
+        },
       },
     ];
 
@@ -738,7 +747,27 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       animation: false,
       tooltip: {
         trigger: "axis",
-        axisPointer: { type: "cross", crossStyle: { color: "#333" } },
+        axisPointer: {
+          type: "cross",
+          crossStyle: { color: "#333" },
+          label: {
+            backgroundColor: "#222",
+            color: "#ccc",
+            fontSize: 11,
+            fontFamily: FONT,
+            formatter: (params: any) => {
+              // Y-axis label: show OHLC of hovered candle
+              if (params.axisDimension === "y" && params.value != null && dataRef.current) {
+                const idx = params.seriesData ? Object.values(params.seriesData)[0]?.dataIndex : null;
+                if (idx != null && dataRef.current.ohlc[idx]) {
+                  const o = dataRef.current.ohlc[idx];
+                  return `O:${o[0].toFixed(2)} H:${o[3].toFixed(2)} L:${o[2].toFixed(2)} C:${o[1].toFixed(2)}`;
+                }
+              }
+              return params.value?.toFixed?.(2) ?? params.value ?? "";
+            },
+          },
+        },
         backgroundColor: "#1a1a1e", borderColor: "#2a2a2e",
         textStyle: { color: "#ccc", fontSize: 12 },
         formatter: (params: unknown) => {
@@ -1019,11 +1048,119 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       const zr = chart.getZr();
 
       // ── Zoom: scroll=pan, drag=pan via dataZoom inside ──
+      // ── KT-06: Ctrl/Cmd+scroll = zoom (anchored at cursor) ──
+      // ── KT-04: Gesture momentum after pan release ──
       const zoomRebuildTimer = { id: null as ReturnType<typeof setTimeout> | null };
       const scheduleRebuild = () => {
         if (zoomRebuildTimer.id) clearTimeout(zoomRebuildTimer.id);
         zoomRebuildTimer.id = setTimeout(() => { rebuildAllDrawings(); zoomRebuildTimer.id = null; }, 80);
       };
+
+      // Ctrl/Cmd+wheel → zoom (anchored at cursor position)
+      let lastCtrlWheelTime = 0;
+      zr.on("mousewheel", (e: any) => {
+        const raw = e.event as WheelEvent;
+        if (!raw.ctrlKey && !raw.metaKey) return; // let dataZoom handle plain scroll=pan
+        e.stop();
+        const now = performance.now();
+        if (now - lastCtrlWheelTime < 16) return; // throttle to ~60fps
+        lastCtrlWheelTime = now;
+
+        const { start, end } = zoomRef.current;
+        const range = end - start;
+        const zoomFactor = raw.deltaY > 0 ? 1.08 : 1 / 1.08; // scroll down = zoom out
+        const newRange = Math.max(2, Math.min(98, range * zoomFactor));
+
+        // Anchor zoom at cursor: what % of the data range is the cursor at?
+        const rect = container.getBoundingClientRect();
+        const cursorX = (raw.clientX - rect.left) / rect.width; // 0..1
+        const cursorPct = start + (end - start) * cursorX;
+
+        let ns = cursorPct - newRange * cursorX;
+        let ne = ns + newRange;
+        if (ns < 0) { ns = 0; ne = newRange; }
+        if (ne > 100) { ne = 100; ns = 100 - newRange; }
+
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
+        zoomRef.current.start = ns;
+        zoomRef.current.end = ne;
+        const d = dataRef.current;
+        if (d) {
+          const total = d.dates.length - 1;
+          zoomRef.current.startVal = Math.round((ns / 100) * total);
+          zoomRef.current.endVal = Math.round((ne / 100) * total);
+        }
+        scheduleRebuild();
+      });
+
+      // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
+      let momentumRaf: number | null = null;
+      let lastPanStart = 0;
+      let lastPanTime = 0;
+      let panVelocity = 0; // % per ms
+
+      const applyMomentum = () => {
+        if (Math.abs(panVelocity) < 0.0005) { momentumRaf = null; return; }
+        const dt = 16; // ~1 frame at 60fps
+        const delta = panVelocity * dt;
+        panVelocity *= 0.95; // decay factor per frame
+        let { start, end } = zoomRef.current;
+        let ns = start + delta;
+        let ne = end + delta;
+        // Clamp at edges — stop momentum if we hit a wall
+        if (ns < 0) { ns = 0; ne = end - start; panVelocity = 0; }
+        if (ne > 100) { ne = 100; ns = 100 - (end - start); panVelocity = 0; }
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: ns, end: ne }] });
+        zoomRef.current.start = ns;
+        zoomRef.current.end = ne;
+        const d = dataRef.current;
+        if (d) {
+          const total = d.dates.length - 1;
+          zoomRef.current.startVal = Math.round((ns / 100) * total);
+          zoomRef.current.endVal = Math.round((ne / 100) * total);
+        }
+        scheduleRebuild();
+        momentumRaf = requestAnimationFrame(applyMomentum);
+      };
+
+      chart.on("dataZoom", (params: any) => {
+        try {
+          const opt = chart.getOption();
+          if (opt.dataZoom && opt.dataZoom[0]) {
+            const newStart = opt.dataZoom[0].start as number;
+            const newEnd = opt.dataZoom[0].end as number;
+            zoomRef.current.start = newStart;
+            zoomRef.current.end = newEnd;
+            const d = dataRef.current;
+            if (d) {
+              const total = d.dates.length - 1;
+              zoomRef.current.startVal = Math.round((newStart / 100) * total);
+              zoomRef.current.endVal = Math.round((newEnd / 100) * total);
+            }
+            // Track velocity for momentum (only for pan moves, not slider)
+            const now = performance.now();
+            if (lastPanTime > 0) {
+              const dt = now - lastPanTime;
+              if (dt > 0 && dt < 200) {
+                panVelocity = (newStart - lastPanStart) / dt;
+              }
+            }
+            lastPanStart = newStart;
+            lastPanTime = now;
+          }
+        } catch (_e) { /* noop */ }
+        scheduleRebuild();
+      });
+
+      // Start momentum on mouseup/touchend (when pan was happening)
+      const startMomentum = () => {
+        if (Math.abs(panVelocity) > 0.0005 && !momentumRaf) {
+          lastPanTime = 0; // reset velocity tracking
+          momentumRaf = requestAnimationFrame(applyMomentum);
+        }
+      };
+      zr.on("mouseup", startMomentum);
+      container.addEventListener("touchend", startMomentum);
 
       // Manual pinch zoom (zrender v6 doesn't dispatch pinch events)
       let pinchStartData: { start: number; end: number; dist: number } | null = null;
@@ -1063,24 +1200,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       container.addEventListener("touchstart", onTouchPinchStart, { passive: false });
       container.addEventListener("touchmove", onTouchPinchMove, { passive: false });
       container.addEventListener("touchend", onTouchPinchEnd, { passive: false });
-
-      // Sync zoom state from dataZoom events (scroll/drag/slider)
-      chart.on("dataZoom", () => {
-        try {
-          const opt = chart.getOption();
-          if (opt.dataZoom && opt.dataZoom[0]) {
-            zoomRef.current.start = opt.dataZoom[0].start as number;
-            zoomRef.current.end = opt.dataZoom[0].end as number;
-            const d = dataRef.current;
-            if (d) {
-              const total = d.dates.length - 1;
-              zoomRef.current.startVal = Math.round((opt.dataZoom[0].start as number / 100) * total);
-              zoomRef.current.endVal = Math.round((opt.dataZoom[0].end as number / 100) * total);
-            }
-          }
-        } catch (_e) { /* noop */ }
-        scheduleRebuild();
-      });
 
       // Drawing events
       const getPos = (e: MouseEvent | TouchEvent) => {
@@ -1286,6 +1405,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
     return () => {
       cancelled = true;
       mountedRef.current = false;
+      if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = null; }
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
       const chart = chartRef.current;
       if (chart) {
@@ -1294,6 +1414,10 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           if (onTouchStart) c.removeEventListener("touchstart", onTouchStart as EventListener);
           if (onTouchMove) c.removeEventListener("touchmove", onTouchMove as EventListener);
           if (onTouchEnd) c.removeEventListener("touchend", onTouchEnd as EventListener);
+          c.removeEventListener("touchstart", onTouchPinchStart as EventListener);
+          c.removeEventListener("touchmove", onTouchPinchMove as EventListener);
+          c.removeEventListener("touchend", onTouchPinchEnd as EventListener);
+          c.removeEventListener("touchend", startMomentum as EventListener);
         }
         chart.dispose();
         chartRef.current = null;
