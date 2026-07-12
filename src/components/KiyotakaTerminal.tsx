@@ -1223,12 +1223,18 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         if (now - lastCtrlWheelTime < 16) return; // throttle to ~60fps
         lastCtrlWheelTime = now;
 
-        const { start, end } = zoomRef.current;
+        // Read actual dataZoom state (may have drifted from dataZoom pan handling)
+        const opt = chart.getOption() as any;
+        const dzArr = (opt.dataZoom || []).filter((dz: any) => dz.id === "__kt_inside");
+        if (!dzArr.length) return;
+        const dz = dzArr[0];
+        const start = dz.start as number;
+        const end = dz.end as number;
         const range = end - start;
         const zoomFactor = raw.deltaY > 0 ? 1.08 : 1 / 1.08; // scroll down = zoom out
         const newRange = Math.max(2, Math.min(98, range * zoomFactor));
 
-        // Anchor zoom at cursor: what % of the data range is the cursor at?
+        // Anchor zoom at cursor X position
         const rect = container.getBoundingClientRect();
         const cursorX = (raw.clientX - rect.left) / rect.width; // 0..1
         const cursorPct = start + (end - start) * cursorX;
@@ -1248,6 +1254,7 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
           zoomRef.current.endVal = Math.round((ne / 100) * total);
         }
         scheduleRebuild();
+        scheduleResCheck();
       });
 
       // KT-04: Gesture momentum — track velocity during pan, apply inertia on release
