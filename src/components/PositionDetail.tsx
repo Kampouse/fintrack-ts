@@ -1,14 +1,38 @@
-import { useState } from "react";
-import { ChevronLeft, Trash2, Pencil, Plus, LayoutGrid, Monitor } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { ChevronLeft, Trash2, Pencil, Plus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen } from "lucide-react";
 import type { Transaction, Quote, Position } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
-import { CandleChart } from "./CandleChart";
-import type { PriceLevel } from "./CandleChart";
+import { CandleChart, type ChartAPI, type PriceLevel } from "./CandleChart";
+import KiyotakaTerminal from "./KiyotakaTerminal";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";
 import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty, fmtDate } from "@/lib/format";
 import { card, btnIcon, row, theme } from "@/lib/styles";
+
+// ─── Kiyotaka terminal colors ───
+const K = {
+  bg: "#0a0a0b",
+  green: "#00EC97",
+  red: "#FF4D4D",
+  dim: "rgba(255,255,255,0.5)",
+  text: "rgba(255,255,255,0.95)",
+  border: "#1e1e22",
+  overlay: "rgba(10,10,11,0.85)",
+  sidebar: "rgba(10,10,11,0.96)",
+  activeBg: "rgba(0,236,151,0.12)",
+};
+
+const MONO: React.CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, monospace", fontVariantNumeric: "tabular-nums" as const };
+
+const TF_OPTIONS = [
+  { days: 0, label: "5m" },
+  { days: -1, label: "1m" },
+  { days: 1, label: "1H" },
+  { days: 7, label: "4H" },
+  { days: 30, label: "1D" },
+  { days: 90, label: "1W" },
+] as const;
 
 interface Props {
   symbol: string;
@@ -28,6 +52,17 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const [showLots, setShowLots] = useState(false);
   const [showAvgs, setShowAvgs] = useState(false);
   const [chartH, setChartH] = useState(286);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Chart API ref for terminal toolbar
+  const chartApiRef = useRef<ChartAPI | null>(null);
+  const [chartTick, setChartTick] = useState(0); // force re-render when chart state changes
+
+  const handleChartApi = useCallback((api: ChartAPI) => {
+    chartApiRef.current = api;
+    // Subscribe to state changes to keep toolbar buttons in sync
+    api.subscribe(() => setChartTick(t => t + 1));
+  }, []);
 
   const lots = txs.filter((t) => t.symbol === symbol).sort((a, b) => a.ts - b.ts);
   const label = labelFromSymbol(symbol);
@@ -41,6 +76,8 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const pnlPct = totalCost > 0 && pnl != null ? (pnl / totalCost) * 100 : null;
   const dayChange = value != null && quote?.changePct != null ? (value * quote.changePct) / 100 : null;
   const pnlColor = pnl != null ? (pnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
+  const kPnlColor = pnl != null ? (pnl >= 0 ? K.green : K.red) : K.dim;
+  const changeColor = (quote?.changePct ?? 0) >= 0 ? K.green : K.red;
 
   // Running avg cost per lot
   let runCost = 0;
@@ -79,6 +116,14 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
     });
   }
 
+  const sepId = useRef(0);
+
+  // ─── Terminal mode ───
+  if (terminal) {
+    return <KiyotakaTerminal symbol={symbol} onBack={() => onToggleTerminal()} />;
+  }
+
+  // ─── Normal mode (unchanged) ───
   const metricsRow = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: 12 }}>
       <div>
@@ -246,46 +291,36 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
       </div>
 
-      {terminal ? (
-        /* Terminal view — chart above metrics + lots */
-        <>
-          {metricsRow}
-          {lotsSection}
-        </>
-      ) : (
-        /* Normal view — metrics left, lots below */
-        <>
-          <div data-detail-row style={{ display: "flex", gap: "var(--app-hpad, 16px)", marginBottom: 16 }}>
-            <div style={{ ...card, flex: 1, padding: '12px 16px' }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(price)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtQty(totalQty)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
-                    {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
-                  <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(avgCost)}</div>
-                </div>
+      {/* Normal view — metrics left, lots below */}
+      <div data-detail-row style={{ display: "flex", gap: "var(--app-hpad, 16px)", marginBottom: 16 }}>
+        <div style={{ ...card, flex: 1, padding: '12px 16px' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+            <div>
+              <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Price</div>
+              <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(price)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Qty</div>
+              <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtQty(totalQty)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>P&L</div>
+              <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: pnlColor }}>
+                {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
               </div>
             </div>
-            <div style={{ ...card, flex: 1 }}>
-              <BasisChart lots={lots} currentPrice={price} />
+            <div>
+              <div style={{ fontSize: "12px", color: "var(--text-dim)" }}>Avg</div>
+              <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(avgCost)}</div>
             </div>
           </div>
-          <style>{`@media (max-width: 639px) { [data-detail-row] { flex-direction: column !important; } }`}</style>
-          {lotsSection}
-        </>
-      )}
+        </div>
+        <div style={{ ...card, flex: 1 }}>
+          <BasisChart lots={lots} currentPrice={price} />
+        </div>
+      </div>
+      <style>{`@media (max-width: 639px) { [data-detail-row] { flex-direction: column !important; } }`}</style>
+      {lotsSection}
 
       {editLot && (
         <EditLotSheet

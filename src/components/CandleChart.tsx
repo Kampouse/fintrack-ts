@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import * as echarts from "echarts";
 import { cgIdFromSymbol } from "@/lib/constants";
 import { fetchVolumeProfile, type VPRow, type Trade, fetchTrades } from "@/api/kiyotaka";
 
-interface OrderbookLevel { price: number; volume: number; }
-interface OrderbookSnapshot { bids: OrderbookLevel[]; asks: OrderbookLevel[]; }
+// ─── Exported types ───
 
 export interface PriceLevel {
   price: number;
@@ -13,15 +13,15 @@ export interface PriceLevel {
 
 export interface TrendLine {
   id: number;
-  startTime: number;  // bar timestamp (ms)
+  startTime: number;
   startPrice: number;
-  endTime: number;    // bar timestamp (ms)
+  endTime: number;
   endPrice: number;
   color: string;
   kind?: "line" | "fib";
 }
 
-interface Props {
+export interface Props {
   symbol: string;
   height?: number;
   resizable?: boolean;
@@ -31,7 +31,38 @@ interface Props {
   onTrendlineAdd?: (tl: TrendLine) => void;
   onTrendlineUpdate?: (tl: TrendLine) => void;
   onTrendlineRemove?: (id: number) => void;
+  /** When true, render only the chart canvas + indicator div — no toolbar rows, no resize handle, no marginBottom wrapper. */
+  chromeless?: boolean;
+  /** Optional callback to expose chart control API (e.g. from terminal toolbar). */
+  onApi?: (api: ChartAPI) => void;
 }
+
+/** Imperative API exposed by CandleChart for external toolbar control. */
+export interface ChartAPI {
+  setDays: (days: number) => void;
+  getDays: () => number;
+  setIndicator: (type: "none" | "macd" | "rsi" | "zscore") => void;
+  getIndicator: () => string;
+  toggleVP: () => void;
+  getVP: () => boolean;
+  toggleTape: () => void;
+  getTape: () => boolean;
+  toggleLog: () => void;
+  getLog: () => boolean;
+  toggleMagnet: () => void;
+  getMagnet: () => boolean;
+  toggleHA: () => void;
+  getHA: () => boolean;
+  toggleFib: () => void;
+  getDrawTool: () => string;
+  createLine: () => void;
+  removeSelected: () => void;
+  getHasSelection: () => boolean;
+  /** Force a re-render of consuming component when chart state changes. */
+  subscribe: (cb: () => void) => () => void;
+}
+
+// ─── Constants ───
 
 const TF = [
   { days: 0, label: "5m" },
@@ -44,7 +75,27 @@ const TF = [
 
 const TL_COLORS = ["#ff6b6b", "#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#fb923c", "#67e8f9"];
 
-function fmtPrice(p: number): string {
+const FIB_LEVELS = [
+  { r: 0, label: "0" },
+  { r: 0.236, label: "0.236" },
+  { r: 0.382, label: "0.382" },
+  { r: 0.5, label: "0.5" },
+  { r: 0.618, label: "0.618" },
+  { r: 0.786, label: "0.786" },
+  { r: 1, label: "1" },
+  { r: 1.618, label: "1.618" },
+];
+
+const FIB_COLORS: Record<string, string> = {
+  "0": "#f87171", "0.236": "#fb923c", "0.382": "#fbbf24",
+  "0.5": "#a78bfa", "0.618": "#34d399", "0.786": "#38bdf8",
+  "1": "#f87171", "1.618": "#f472b6",
+};
+
+// ─── Helpers ───
+
+export function fmtPrice(p: number): string {
+  if (p == null || isNaN(p)) return "";
   if (p >= 1000) return p.toFixed(2);
   if (p >= 100) return p.toFixed(2);
   if (p >= 1) return p.toFixed(3);
@@ -92,123 +143,15 @@ function toHeikinAshi(bars: Bar[]): Bar[] {
   return result;
 }
 
-interface DrawState {
-  bars: Bar[];
-  subDaily: boolean;
-  padLeft: number;
-  padRight: number;
-  padTop: number;
-  padBottom: number;
-  chartW: number;
-  chartH: number;
-  volH: number;
-  lo: number;
-  hi: number;
-  totalRange: number;
-  maxVol: number;
-  priceToY: (p: number) => number;
-  yToPrice: (y: number) => number;
-  barWidth: number;
-  bodyWidth: number;
-  viewStart: number;
-  viewEnd: number;
-  visibleBars: Bar[];
-  volScale: number;
-  idxToX: (idx: number) => number;
-  xToIdx: (x: number) => number;
-  logScale: boolean;
-}
-
-async function fetchOHLC(symbol: string, days: number) {
-  // Stocks: use Finnhub candle API
-  if (!symbol.startsWith("BINANCE:")) {
-    let resolution = "D";
-    let count = 250;
-    if (days < 0 || days === 0) { resolution = "5"; count = 60; }
-    else if (days <= 1) { resolution = "5"; count = 72; }
-    else if (days <= 7) { resolution = "60"; count = 250; }
-    else if (days <= 30) { resolution = "D"; count = 30; }
-    else { resolution = "D"; count = 250; }
-    const now = Math.floor(Date.now() / 1000);
-    const from = days <= 1 ? now - count * 300 : days <= 7 ? now - count * 3600 : now - count * 86400;
-    try {
-      const res = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}`);
-      if (!res.ok) return [];
-      const json = await res.json();
-      if (!json?.length) return [];
-      // API returns array of {t, o, h, l, c}
-      return json.map((k: { t: number; o: number; h: number; l: number; c: number; v?: number }) => ({
-        time: resolution === "D"
-          ? new Date(k.t * 1000).toISOString().split("T")[0]
-          : new Date(k.t * 1000).toISOString().substring(0, 19),
-        open: k.o,
-        high: k.h,
-        low: k.l,
-        close: k.c,
-        volume: k.v ?? 0,
-      }));
-    } catch { return []; }
-  }
-
-  // Crypto: Binance
-  const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
-
-  let interval = "1d";
-  let limit = 250;
-  if (days < 0) { interval = "1m"; limit = 60; }
-  else if (days === 0) { interval = "5m"; limit = 60; }
-  else if (days <= 1) { interval = "5m"; limit = 72; }
-  else if (days <= 7) { interval = "1h"; limit = 250; }
-  else if (days <= 30) { interval = "1d"; limit = 30; }
-  else { interval = "1d"; limit = 250; }
-
-  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=${interval}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const data: unknown[][] = await res.json();
-  if (!data?.length) return [];
-
-  const isSubDaily = interval.includes("m") || interval.includes("h");
-  return data.map((k) => {
-    const d = new Date(k[0] as number);
-    const time = isSubDaily
-      ? d.toISOString().substring(0, 19)
-      : d.toISOString().split("T")[0];
-    return {
-      time,
-      open: parseFloat(k[1] as string),
-      high: parseFloat(k[2] as string),
-      low: parseFloat(k[3] as string),
-      close: parseFloat(k[4] as string),
-      volume: parseFloat(k[5] as string),
-    };
-  });
-}
-
-function parseTime(t: string) {
+function parseTime(t: string): number {
   const d = new Date(t);
   return isNaN(d.getTime()) ? 0 : d.getTime();
-}
-
-function computeSMA(bars: Bar[], period: number): Map<number, number> {
-  const sma = new Map<number, number>();
-  if (bars.length < period) return sma;
-  let sum = 0;
-  for (let i = 0; i < bars.length; i++) {
-    sum += bars[i].close;
-    if (i >= period - 1) {
-      sma.set(i, sum / period);
-      sum -= bars[i - period + 1].close;
-    }
-  }
-  return sma;
 }
 
 function computeEMA(bars: Bar[], period: number): Map<number, number> {
   const ema = new Map<number, number>();
   if (bars.length < period) return ema;
   const k = 2 / (period + 1);
-  // Seed with SMA
   let sum = 0;
   for (let i = 0; i < period; i++) sum += bars[i].close;
   ema.set(period - 1, sum / period);
@@ -228,20 +171,18 @@ function computeMACD(bars: Bar[]): { macd: Map<number, number>; signal: Map<numb
     const v12 = ema12.get(i);
     const v26 = ema26.get(i);
     if (v12 != null && v26 != null) {
-      const val = v12 - v26;
-      macd.set(i, val);
-      macdLine.push(val);
+      macd.set(i, v12 - v26);
+      macdLine.push(v12 - v26);
     } else {
       macdLine.push(0);
     }
   }
-  // Signal: 9-period EMA of MACD line
   const signal = new Map<number, number>();
   if (macdLine.length >= 9) {
     const k = 2 / 10;
     let sum = 0;
     for (let j = 0; j < 9; j++) sum += macdLine[j];
-    signal.set(25, sum / 9); // first signal at index 25 (where ema26 starts)
+    signal.set(25, sum / 9);
     for (let i = 26; i < bars.length; i++) {
       const prev = signal.get(i - 1) ?? 0;
       signal.set(i, macdLine[i] * k + prev * (1 - k));
@@ -291,6 +232,7 @@ function computeZScore(bars: Bar[], period = 20): Map<number, number> {
   return z;
 }
 
+<<<<<<< HEAD
 // ── Buy the Dip / Sell the Rip signals ──────────────────────────────────────
 function computeBtSrSignals(
   bars: Bar[],
@@ -428,282 +370,887 @@ function buildDrawState(
   const chartH = h - padTop - padBottom - volH;
 
   if (!bars.length || chartW < 20 || chartH < 20) {
+=======
+async function fetchOHLC(symbol: string, days: number): Promise<Bar[]> {
+  if (!symbol.startsWith("BINANCE:")) {
+    let resolution = "D";
+    let count = 250;
+    if (days < 0 || days === 0) { resolution = "5"; count = 60; }
+    else if (days <= 1) { resolution = "5"; count = 72; }
+    else if (days <= 7) { resolution = "60"; count = 250; }
+    else if (days <= 30) { resolution = "D"; count = 30; }
+    else { resolution = "D"; count = 250; }
+    const now = Math.floor(Date.now() / 1000);
+    const from = days <= 1 ? now - count * 300 : days <= 7 ? now - count * 3600 : now - count * 86400;
+    try {
+      const res = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (!json?.length) return [];
+      return json.map((k: { t: number; o: number; h: number; l: number; c: number; v?: number }) => ({
+        time: resolution === "D"
+          ? new Date(k.t * 1000).toISOString().split("T")[0]
+          : new Date(k.t * 1000).toISOString().substring(0, 19),
+        open: k.o, high: k.h, low: k.l, close: k.c, volume: k.v ?? 0,
+      }));
+    } catch { return []; }
+  }
+  const binanceSymbol = symbol.replace("BINANCE:", "").replace("USDT", "USDT");
+  let interval = "1d";
+  let limit = 250;
+  if (days < 0) { interval = "1m"; limit = 60; }
+  else if (days === 0) { interval = "5m"; limit = 60; }
+  else if (days <= 1) { interval = "5m"; limit = 72; }
+  else if (days <= 7) { interval = "1h"; limit = 250; }
+  else if (days <= 30) { interval = "1d"; limit = 30; }
+  else { interval = "1d"; limit = 250; }
+  const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=${interval}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data: unknown[][] = await res.json();
+  if (!data?.length) return [];
+  const isSubDaily = interval.includes("m") || interval.includes("h");
+  return data.map((k) => {
+    const d = new Date(k[0] as number);
+    const time = isSubDaily
+      ? d.toISOString().substring(0, 19)
+      : d.toISOString().split("T")[0];
+>>>>>>> d246df0 (fix: bypass broken ECharts 6 graphic component - draw directly on zrender canvas)
     return {
-      bars, subDaily, padLeft, padRight, padTop, padBottom,
-      chartW, chartH, volH, lo: 0, hi: 1, totalRange: 1,
-      maxVol: 1, priceToY: () => 0, yToPrice: () => 0, barWidth: 0, bodyWidth: 0,
-      viewStart, viewEnd, visibleBars: [], volScale: 0,
-      idxToX: () => 0, xToIdx: () => 0, logScale: !!logScale,
+      time,
+      open: parseFloat(k[1] as string),
+      high: parseFloat(k[2] as string),
+      low: parseFloat(k[3] as string),
+      close: parseFloat(k[4] as string),
+      volume: parseFloat(k[5] as string),
+    };
+  });
+}
+
+function findBarIndexByTime(bars: Bar[], ts: number): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < bars.length; i++) {
+    const bt = parseTime(bars[i].time);
+    const d = Math.abs(bt - ts);
+    if (d < bestDist) { bestDist = d; best = i; }
+    if (bt > ts) break;
+  }
+  return best;
+}
+
+// ─── ChartManager — vanilla JS ECharts management ───
+
+interface ChartManagerConfig {
+  symbol: string;
+  height: number;
+  onStatusChange?: (status: { loading: boolean; error: boolean; empty: boolean }) => void;
+  onTrendlineUpdate?: (tl: TrendLine) => void;
+  onTrendlineAdd?: (tl: TrendLine) => void;
+  onTrendlineRemove?: (id: number) => void;
+}
+
+type IndicatorType = "none" | "macd" | "rsi" | "zscore";
+
+class ChartManager {
+  private chart: echarts.ECharts | null = null;
+  private indChart: echarts.ECharts | null = null;
+  private dom: HTMLElement;
+  private indDom: HTMLElement | null = null;
+  private _destroyed = false;
+  private config: ChartManagerConfig;
+
+  // Internal state
+  private bars: Bar[] = [];
+  private days = 1;
+  private indicator: IndicatorType = "none";
+  private logScale = false;
+  private candleType: "candle" | "heikin" = "candle";
+  private magnet = false;
+  private showVP = false;
+  private vpData: VPRow[] = [];
+  private priceLevels: PriceLevel[] = [];
+  private trendlines: TrendLine[] = [];
+  private selectedTlId: number | null = null;
+  private nextId = 1;
+  private drawTool: "line" | "fib" = "line";
+
+  // Zoom state
+  private dz = { start: 0, end: 100 };
+  private priceZoom: { min: number; max: number } | null = null;
+
+  // Interaction state
+  private pinchRef = { active: false, dist: 0, startDz: { start: 0, end: 0 } };
+  private measureRef: { x1: number; x2: number } | null = null;
+  private longPressRef: { x: number; y: number; timer: ReturnType<typeof setTimeout> | null } = { x: 0, y: 0, timer: null };
+  private measureActive = false;
+  private dragRef: { tlId: number; mode: "start" | "end" | "move"; startPixelX: number; startPixelY: number; origTl: TrendLine } | null = null;
+  private priceZoomDragRef: { startY: number; origMin: number; origMax: number } | null = null;
+
+  // Auto-refresh
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private vpTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Tracked event handler references for cleanup
+  private boundHandlers: { [key: string]: ((e: any) => void) } = {};
+
+  // Public callback for React to set trendlines
+  public onTrendlineSelect: ((id: number | null) => void) | null = null;
+
+  constructor(dom: HTMLElement, config: ChartManagerConfig) {
+    this.dom = dom;
+    this.config = config;
+  }
+
+  private init(): void {
+    const existing = echarts.getInstanceByDom(this.dom);
+    if (existing) { existing.dispose(); }
+    this.chart = echarts.init(this.dom, null, { renderer: "canvas" });
+    this.bindEvents();
+  }
+
+  scheduleInit(): void {
+    setTimeout(() => {
+      if (this._destroyed) return;
+      this.init();
+      this.doLoadBars(true);
+      this.startAutoRefresh();
+    }, 0);
+  }
+
+  setIndicatorDom(el: HTMLElement): void {
+    this.indDom = el;
+  }
+
+  destroy(): void {
+    this._destroyed = true;
+    this.cleanupTimers();
+    if (this._renderTimer) { clearTimeout(this._renderTimer); this._renderTimer = null; }
+    this.unbindEvents();
+    if (this.indChart) { this.indChart.dispose(); this.indChart = null; }
+    if (this.chart) { this.chart.dispose(); this.chart = null; }
+  }
+
+  // ─── Public API (called by React component) ───
+
+  setDays(d: number, resetZoom = true): void {
+    this.days = d;
+    if (resetZoom) this.priceZoom = null;
+    this.scheduleRefresh();
+  }
+
+  setBars(bars: Bar[], initial = false): void {
+    this.bars = bars;
+    if (initial) {
+      this.priceZoom = null;
+      const visibleCount = this.days <= 1 ? 80 : bars.length;
+      const start = Math.max(0, bars.length - visibleCount);
+      const startPct = (start / bars.length) * 100;
+      this.dz = { start: startPct, end: 100 };
+    }
+    this.scheduleRender();
+  }
+
+  setIndicator(type: IndicatorType): void {
+    this.indicator = type;
+    if (type === "none") {
+      if (this.indChart) { this.indChart.dispose(); this.indChart = null; }
+    } else if (this.indDom) {
+      setTimeout(() => {
+        if (!this.indDom) return;
+        const existing = echarts.getInstanceByDom(this.indDom);
+        if (existing) existing.dispose();
+        this.indChart = echarts.init(this.indDom, null, { renderer: "canvas" });
+        this.renderIndicator();
+      }, 0);
+    }
+    this.scheduleRender();
+  }
+
+  setLogScale(v: boolean): void {
+    if (v !== this.logScale) { this.logScale = v; this.priceZoom = null; this.scheduleRender(); }
+  }
+
+  setHeikinAshi(v: boolean): void {
+    this.candleType = v ? "heikin" : "candle";
+    this.scheduleRender();
+  }
+
+  setPriceLevels(levels: PriceLevel[]): void {
+    this.priceLevels = levels;
+    this.scheduleRender();
+  }
+
+  setTrendlines(tls: TrendLine[]): void {
+    this.trendlines = tls;
+    this.scheduleRender();
+  }
+
+  setSelectedTrendlineId(id: number | null): void {
+    this.selectedTlId = id;
+    this.scheduleRender();
+  }
+
+  setMagnet(v: boolean): void { this.magnet = v; }
+
+  setDrawTool(tool: "line" | "fib"): void { this.drawTool = tool; }
+
+  setShowVP(v: boolean): void { this.showVP = v; this.scheduleRender(); }
+
+  setVpData(data: VPRow[]): void { this.vpData = data; this.scheduleRender(); }
+
+  setHeight(h: number): void {
+    this.config.height = h;
+    this.scheduleRender();
+  }
+
+  addPriceLevel(level: PriceLevel): void {
+    this.priceLevels = [...this.priceLevels, level];
+    this.scheduleRender();
+  }
+
+  removePriceLevel(idx: number): void {
+    this.priceLevels = this.priceLevels.filter((_, i) => i !== idx);
+    this.scheduleRender();
+  }
+
+  createTrendline(): void {
+    if (!this.bars.length) return;
+    const bars = this.bars;
+    const totalBars = bars.length;
+    const startIdx = Math.round(this.dz.start / 100 * totalBars);
+    const endIdx = Math.round(this.dz.end / 100 * totalBars);
+    const mid = Math.floor((startIdx + endIdx) / 2);
+    const span = Math.max(3, Math.floor((endIdx - startIdx) / 6));
+
+    let stLo = bars[Math.min(mid, bars.length - 1)].close * 0.96;
+    let stHi = bars[Math.min(mid, bars.length - 1)].close * 1.04;
+    try {
+      const opt = this.chart?.getOption() as any;
+      if (opt?.yAxis?.[0]) {
+        stLo = opt.yAxis[0].min ?? stLo;
+        stHi = opt.yAxis[0].max ?? stHi;
+      }
+    } catch { /* skip */ }
+
+    const newTl: TrendLine = {
+      id: this.nextId++,
+      startTime: parseTime(bars[Math.max(0, mid - span)].time),
+      startPrice: stHi,
+      endTime: parseTime(bars[Math.min(bars.length - 1, mid + span)].time),
+      endPrice: stLo,
+      color: TL_COLORS[this.trendlines.length % TL_COLORS.length],
+      kind: this.drawTool,
+    };
+
+    if (this.config.onTrendlineAdd) {
+      this.config.onTrendlineAdd(newTl);
+    }
+    this.trendlines = [...this.trendlines, newTl];
+    this.selectedTlId = newTl.id;
+    this.onTrendlineSelect?.(newTl.id);
+    this.scheduleRender();
+  }
+
+  removeSelectedTrendline(): void {
+    if (this.selectedTlId == null) return;
+    const id = this.selectedTlId;
+    this.selectedTlId = null;
+    this.onTrendlineSelect?.(null);
+    if (this.config.onTrendlineRemove) {
+      this.config.onTrendlineRemove(id);
+    }
+    this.trendlines = this.trendlines.filter(t => t.id !== id);
+    this.scheduleRender();
+  }
+
+  startAutoRefresh(): void {
+    this.cleanupTimers();
+    const refreshMs = this.days <= 1 ? 5_000 : 15_000;
+    this.refreshTimer = setInterval(() => this.doLoadBars(false), refreshMs);
+  }
+
+  startVPRefresh(): void {
+    if (this.vpTimer) clearInterval(this.vpTimer);
+    this.loadVP();
+    this.vpTimer = setInterval(() => this.loadVP(), 60_000);
+  }
+
+  stopVPRefresh(): void {
+    if (this.vpTimer) { clearInterval(this.vpTimer); this.vpTimer = null; }
+  }
+
+  resize(): void {
+    setTimeout(() => {
+      this.chart?.resize();
+      this.indChart?.resize();
+    }, 80);
+  }
+
+  // ─── Internal: data loading ───
+
+  private async doLoadBars(initial = true): Promise<void> {
+    if (this._destroyed) return;
+    try {
+      this.setStatus({ loading: initial, error: false, empty: false });
+      const bars = await fetchOHLC(this.config.symbol, this.days);
+      this.setBars(bars, initial);
+    } catch {
+      this.setStatus({ loading: false, error: true, empty: false });
+    }
+  }
+
+  private async loadVP(): Promise<void> {
+    if (!this.showVP || !this.config.symbol.startsWith("BINANCE:") || !this.bars.length) {
+      this.vpData = [];
+      return;
+    }
+    const bars = this.bars;
+    const from = Math.floor(parseTime(bars[0].time) / 1000);
+    const to = Math.floor(parseTime(bars[bars.length - 1].time) / 1000);
+    const resMap: Record<string, string> = { "1": "5", "5": "5", "15": "15", "60": "60", "D": "60" };
+    try {
+      const data = await fetchVolumeProfile(this.config.symbol, resMap[String(this.days)] || "60", from, to + 300);
+      this.vpData = data;
+      this.scheduleRender();
+    } catch { /* skip */ }
+  }
+
+  // ─── Internal: pixel ↔ data conversion ───
+
+  private pixelToData(px: number, _py: number): { idx: number; price: number } | null {
+    const inst = this.chart;
+    if (!inst || !this.bars.length) return null;
+    try {
+      const pt = inst.convertFromPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [px, _py]);
+      if (!pt || pt.length < 2) return null;
+      const idx = Math.round(pt[0]);
+      return { idx: Math.max(0, Math.min(this.bars.length - 1, idx)), price: pt[1] };
+    } catch { return null; }
+  }
+
+  private dataToPixel(idx: number, price: number): [number, number] | null {
+    const inst = this.chart;
+    if (!inst) return null;
+    try {
+      const pt = inst.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [idx, price]);
+      return pt && pt.length === 2 ? [pt[0], pt[1]] : null;
+    } catch { return null; }
+  }
+
+  private snapToOHLC(idx: number, price: number): { idx: number; price: number } {
+    const bars = this.bars;
+    if (!bars.length) return { idx, price };
+    const i = Math.max(0, Math.min(bars.length - 1, idx));
+    const bar = bars[i];
+    const candidates = [bar.open, bar.high, bar.low, bar.close];
+    let best = candidates[0];
+    let bestDist = Math.abs(price - best);
+    for (const c of candidates) {
+      const d = Math.abs(price - c);
+      if (d < bestDist) { bestDist = d; best = c; }
+    }
+    return { idx: i, price: best };
+  }
+
+  // ─── Internal: hit-test trendlines ───
+
+  private hitTestTrendline(px: number, py: number): { tl: TrendLine; mode: "start" | "end" | "move" } | null {
+    const bars = this.bars;
+    if (!this.chart || !bars.length) return null;
+    let best: { tl: TrendLine; mode: "start" | "end" | "move"; dist: number } | null = null;
+    for (const tl of [...this.trendlines].reverse()) {
+      const si = findBarIndexByTime(bars, tl.startTime);
+      const ei = findBarIndexByTime(bars, tl.endTime);
+      const p1 = this.dataToPixel(si, tl.startPrice);
+      const p2 = this.dataToPixel(ei, tl.endPrice);
+      if (!p1 || !p2) continue;
+      for (const [mode, ex, ey] of [[ "start", p1[0], p1[1] ], [ "end", p2[0], p2[1] ]] as const) {
+        const d = Math.sqrt((px - ex) ** 2 + (py - ey) ** 2);
+        if (d < 26 && (!best || d < best.dist)) best = { tl, mode, dist: d };
+      }
+      const lenSq = (p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2;
+      if (lenSq > 0) {
+        const t = Math.max(0, Math.min(1, ((px - p1[0]) * (p2[0] - p1[0]) + (py - p1[1]) * (p2[1] - p1[1])) / lenSq));
+        const projX = p1[0] + t * (p2[0] - p1[0]);
+        const projY = p1[1] + t * (p2[1] - p1[1]);
+        const d = Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+        if (d < 18 && (!best || d < best.dist)) best = { tl, mode: "move", dist: d };
+      }
+    }
+    return best ? { tl: best.tl, mode: best.mode } : null;
+  }
+
+  // ─── Internal: build main chart option ───
+
+  private buildMainOption(): echarts.EChartsOption {
+    const bars = this.bars;
+    if (!bars.length) return {};
+
+    const drawBars = this.candleType === "heikin" ? toHeikinAshi(bars) : bars;
+    const times = drawBars.map(b => b.time);
+    const candleData = drawBars.map(b => [b.open, b.close, b.low, b.high] as [number, number, number, number]);
+    const volumeData = drawBars.map(b => ({
+      value: b.volume,
+      itemStyle: { color: b.close >= b.open ? "rgba(83,255,132,0.15)" : "rgba(248,113,113,0.15)" },
+    }));
+
+    const ema20 = computeEMA(drawBars, 20);
+    const ema50 = computeEMA(drawBars, 50);
+    const ema20Data = drawBars.map((_, i) => ema20.get(i) ?? null);
+    const ema50Data = drawBars.map((_, i) => ema50.get(i) ?? null);
+
+    const height = this.config.height;
+    const padTop = 6;
+    const padBottom = 22;
+    const volSectionH = 28;
+    const gap = 2;
+    const candleH = Math.max(20, height - padTop - padBottom - volSectionH - gap);
+
+    const subDaily = this.days <= 1;
+    const priceLabelFormatter = (v: number) => fmtPrice(v);
+    const timeLabelFormatter = (v: string) => {
+      const t = parseTime(v);
+      return subDaily
+        ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+        : new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+    };
+
+    const visibleBars = Math.round((this.dz.end - this.dz.start) / 100 * bars.length);
+    const labelStep = visibleBars <= 8 ? 1 : Math.max(1, Math.floor(visibleBars / 4));
+
+    const lastBar = drawBars[drawBars.length - 1];
+    const currentPrice = lastBar?.close ?? 0;
+    const isUp = lastBar ? lastBar.close >= lastBar.open : true;
+    const priceColor = isUp ? "rgba(83,255,132,0.5)" : "rgba(248,113,113,0.5)";
+
+    const priceLevelLines = this.priceLevels.map(l => ({
+      yAxis: l.price,
+      lineStyle: { color: l.color, type: "dashed" as const, width: 1, opacity: 0.6 },
+      label: {
+        show: true,
+        position: "insideEndTop" as const,
+        formatter: `${l.label} ${fmtPrice(l.price)}`,
+        color: l.color,
+        fontSize: 9,
+        fontFamily: "ui-monospace, SFMono-Regular, monospace",
+        backgroundColor: l.color + "33",
+        padding: [2, 4],
+        borderRadius: 3,
+      },
+      symbol: "none",
+    }));
+
+    return {
+      animation: false,
+      backgroundColor: "transparent",
+      grid: [
+        { left: 4, right: 56, top: padTop, height: candleH },
+        { left: 4, right: 56, top: padTop + candleH + gap, height: volSectionH },
+      ],
+      xAxis: [
+        {
+          type: "category", data: times, gridIndex: 0, show: false, boundaryGap: true,
+          axisTick: { show: false }, axisLine: { show: false },
+        },
+        {
+          type: "category", data: times, gridIndex: 1, show: true, boundaryGap: true,
+          position: "bottom",
+          axisTick: { show: false },
+          axisLine: { show: false, onZero: false },
+          axisLabel: {
+            show: true, color: "rgba(255,255,255,0.4)", fontSize: 10,
+            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            formatter: timeLabelFormatter, interval: labelStep - 1,
+          },
+          splitLine: { show: false },
+        },
+      ],
+      yAxis: [
+        {
+          type: this.logScale ? "log" : "value", gridIndex: 0, scale: true,
+          position: "right", splitNumber: 4,
+          splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)", type: "solid" } },
+          axisLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.06)" } },
+          axisTick: { show: false },
+          axisLabel: { color: "rgba(255,255,255,0.5)", fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, monospace", formatter: priceLabelFormatter },
+          min: this.priceZoom?.min,
+          max: this.priceZoom?.max,
+        },
+        {
+          type: "value", gridIndex: 1, show: false, splitNumber: 2,
+          splitLine: { show: false }, axisLine: { show: false },
+          axisTick: { show: false }, axisLabel: { show: false },
+        },
+      ],
+      dataZoom: [
+        {
+          type: "inside", xAxisIndex: [0, 1],
+          start: this.dz.start, end: this.dz.end,
+          filterMode: "none", zoomLock: false,
+          moveOnMouseMove: true, moveOnMouseWheel: false, zoomOnMouseWheel: true,
+        },
+      ],
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "cross",
+          crossStyle: { color: "rgba(255,255,255,0.2)" },
+          lineStyle: { color: "rgba(255,255,255,0.2)", type: "dashed", width: 1 },
+          label: { show: false },
+        },
+        backgroundColor: "rgba(0,0,0,0.75)",
+        borderColor: "transparent",
+        textStyle: { color: "rgba(255,255,255,0.9)", fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, monospace" },
+        formatter: (params: any) => {
+          if (!params || !params.length) return "";
+          const bar = params[0];
+          const d = bar.data;
+          if (!d || d.length < 4) return "";
+          const idx = bar.dataIndex;
+          const b = drawBars[idx];
+          if (!b) return "";
+          const ts = parseTime(b.time);
+          const timeLabel = subDaily
+            ? new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+            : new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+          return `<div style="min-width:120px">
+            <div style="color:rgba(255,255,255,0.6);margin-bottom:2px">${timeLabel}</div>
+            <div><span style="color:#53ff84">O ${fmtPrice(d[0])}</span>  <span style="color:#f87171">H ${fmtPrice(d[3])}</span></div>
+            <div><span style="color:#53ff84">L ${fmtPrice(d[2])}</span>  <span style="color:#f87171">C ${fmtPrice(d[1])}</span></div>
+          </div>`;
+        },
+      },
+      series: [
+        {
+          name: "candle", type: "candlestick", xAxisIndex: 0, yAxisIndex: 0, data: candleData,
+          itemStyle: {
+            color: "#53ff84", color0: "rgba(255,255,255,0.02)",
+            borderColor: "#53ff84", borderColor0: "#f87171", borderWidth: 1,
+          },
+        },
+        {
+          name: "ema20", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: ema20Data,
+          smooth: false, symbol: "none",
+          lineStyle: { color: "rgba(255,255,100,0.5)", width: 1 }, z: 1,
+        },
+        {
+          name: "ema50", type: "line", xAxisIndex: 0, yAxisIndex: 0, data: ema50Data,
+          smooth: false, symbol: "none",
+          lineStyle: { color: "rgba(147,130,220,0.6)", width: 1 }, z: 1,
+        },
+        {
+          name: "volume", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volumeData, barMaxWidth: 8,
+        },
+        {
+          name: "currentPrice", type: "line", xAxisIndex: 0, yAxisIndex: 0,
+          data: drawBars.map(() => currentPrice),
+          markLine: {
+            silent: true, symbol: "none", animation: false,
+            data: [
+              { yAxis: currentPrice, lineStyle: { color: priceColor, type: "dashed", width: 1 } },
+              ...priceLevelLines,
+            ],
+            label: {
+              show: true, position: "insideEndTop",
+              formatter: () => fmtPrice(currentPrice),
+              color: isUp ? "#53ff84" : "#f87171",
+              fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, monospace",
+              backgroundColor: isUp ? "#53ff84" : "#f87171",
+              padding: [2, 6], borderRadius: 3,
+            },
+          },
+          lineStyle: { opacity: 0 }, symbol: "none", z: 0,
+        },
+      ],
     };
   }
 
-  const vs = Math.max(0, Math.min(viewStart, bars.length - 1));
-  const ve = Math.max(1, Math.min(viewEnd, bars.length));
-  const visible = bars.slice(vs, ve);
+  // ─── Internal: build indicator option ───
 
-  let lo = Infinity, hi = -Infinity, maxVol = 0;
-  for (const b of visible) {
-    if (b.low < lo) lo = b.low;
-    if (b.high > hi) hi = b.high;
-    if (b.volume > maxVol) maxVol = b.volume;
-  }
-  const priceRange = hi - lo || 1;
-  const pricePad = priceRange * 0.08;
+  private buildIndicatorOption(): echarts.EChartsOption {
+    const bars = this.bars;
+    const type = this.indicator;
+    if (!bars.length || type === "none") return {};
 
-  if (priceOverride) {
-    lo = priceOverride.lo;
-    hi = priceOverride.hi;
-  } else {
-    lo -= pricePad;
-    hi += pricePad;
-  }
-  if (lo <= 0) lo = 0.0001;  // clamp for log
-  const totalRange = hi - lo;
+    const times = bars.map(b => b.time);
+    const visibleBars = Math.round((this.dz.end - this.dz.start) / 100 * bars.length);
+    const labelStep = visibleBars <= 8 ? 1 : Math.max(1, Math.floor(visibleBars / 4));
+    const subDaily = this.days <= 1;
+    const timeLabelFormatter = (v: string) => {
+      const t = parseTime(v);
+      return subDaily
+        ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+        : new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+    };
 
-  const priceToY = logScale
-    ? (p: number) => { const pp = Math.max(lo, p); return padTop + chartH - ((Math.log(pp) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))) * chartH; }
-    : (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
-  const yToPrice = logScale
-    ? (y: number) => Math.exp(Math.log(lo) + ((padTop + chartH - y) / chartH) * (Math.log(hi) - Math.log(lo)))
-    : (y: number) => lo + ((padTop + chartH - y) / chartH) * totalRange;
-  const barWidth = chartW / visible.length;
-  const bodyWidth = Math.max(1, barWidth * 0.6);
-  const volScale = maxVol > 0 ? volH / maxVol : 0;
+    const baseOption: echarts.EChartsOption = {
+      animation: false,
+      backgroundColor: "transparent",
+      grid: [{ left: 4, right: 56, top: 4, bottom: 18 }],
+      xAxis: [{
+        type: "category", data: times, show: true, position: "bottom",
+        axisTick: { show: false }, axisLine: { show: false },
+        axisLabel: { color: "rgba(255,255,255,0.4)", fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, monospace", formatter: timeLabelFormatter, interval: labelStep - 1 },
+        splitLine: { show: false },
+      }],
+      yAxis: [{
+        type: "value", show: true, position: "right", splitNumber: 2,
+        splitLine: { show: false },
+        axisLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.06)" } },
+        axisTick: { show: false },
+        axisLabel: { color: "rgba(255,255,255,0.3)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" },
+      }],
+      dataZoom: [{ type: "inside", xAxisIndex: 0, start: this.dz.start, end: this.dz.end, filterMode: "none" }],
+      tooltip: { show: false },
+    };
 
-  // Map absolute bar index to pixel X and back
-  const idxToX = (idx: number) => padLeft + (idx - vs + 0.5) * barWidth;
-  const xToIdx = (x: number) => vs + (x - padLeft) / barWidth - 0.5;
-
-  return {
-    bars, subDaily, padLeft, padRight, padTop, padBottom,
-    chartW, chartH, volH, lo, hi, totalRange,
-    maxVol, priceToY, yToPrice, barWidth, bodyWidth,
-    viewStart: vs, viewEnd: ve, visibleBars: visible, volScale,
-    idxToX, xToIdx, logScale: !!logScale,
-  };
-}
-
-function drawVolumeProfile(
-  ctx: CanvasRenderingContext2D,
-  s: DrawState,
-  vpData: VPRow[],
-) {
-  if (!vpData.length) return;
-  const { padLeft, padTop, chartH, chartW, lo, hi, priceToY } = s;
-  const rightEdgeX = chartW + padLeft;
-
-  // Find max total volume for scaling
-  let maxVol = 0;
-  for (const row of vpData) {
-    const total = row.buy + row.sell;
-    if (total > maxVol) maxVol = total;
-  }
-  if (maxVol === 0) return;
-
-  // Bar height: map VP price step (~$3) to pixel height
-  // Get the pixel span for one VP price step
-  const vpStep = vpData.length > 1 ? vpData[1].price - vpData[0].price : 3;
-  const barH = Math.max(1, Math.abs(priceToY(vpData[0].price) - priceToY(vpData[0].price + vpStep)));
-
-  // Max bar width = 25% of chart width (so candles remain readable)
-  const vpWidth = chartW * 0.25;
-
-  for (const row of vpData) {
-    if (row.price < lo || row.price > hi) continue;
-    const y = priceToY(row.price);
-    const barTop = y - barH / 2;
-    if (barTop < padTop || barTop + barH > padTop + chartH) continue;
-
-    const total = row.buy + row.sell;
-    const buyRatio = row.buy / total;
-    const barW = Math.max(1, (total / maxVol) * vpWidth);
-    const buyW = barW * buyRatio;
-    const sellW = barW - buyW;
-
-    const x = rightEdgeX - barW;
-
-    // Sell side (left portion)
-    if (sellW > 0) {
-      ctx.fillStyle = "rgba(248,113,113,0.18)";
-      ctx.fillRect(x, barTop, sellW, barH);
+    if (type === "rsi") {
+      const rsi = computeRSI(bars);
+      const data = bars.map((_, i) => rsi.get(i) ?? null);
+      return {
+        ...baseOption,
+        yAxis: [{ ...baseOption.yAxis as any, min: 0, max: 100, splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.04)", type: "dashed" } } }] as any,
+        graphic: [{
+          type: "text", left: 8, top: 6,
+          style: { text: "RSI 14", fill: "rgba(168,85,247,0.6)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" }, z: 10,
+        }],
+        series: [{
+          type: "line", data, symbol: "none",
+          lineStyle: { color: "rgba(168,85,247,0.7)", width: 1 },
+          markArea: {
+            silent: true,
+            data: [
+              [{ yAxis: 70, itemStyle: { color: "rgba(248,113,113,0.04)" } }, { yAxis: 100 }],
+              [{ yAxis: 0, itemStyle: { color: "rgba(83,255,132,0.04)" } }, { yAxis: 30 }],
+            ],
+          },
+          markLine: {
+            silent: true, symbol: "none",
+            data: [
+              { yAxis: 70, lineStyle: { color: "rgba(255,255,255,0.1)", type: "dashed", width: 0.5 } },
+              { yAxis: 30, lineStyle: { color: "rgba(255,255,255,0.1)", type: "dashed", width: 0.5 } },
+              { yAxis: 50, lineStyle: { color: "rgba(255,255,255,0.1)", type: "dashed", width: 0.5 } },
+            ],
+            label: { show: true, position: "insideEndTop", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace", color: "rgba(255,255,255,0.3)" },
+          },
+        }],
+      };
     }
-    // Buy side (right portion)
-    if (buyW > 0) {
-      ctx.fillStyle = "rgba(83,255,132,0.18)";
-      ctx.fillRect(x + sellW, barTop, buyW, barH);
+
+    if (type === "macd") {
+      const { macd, signal, histogram } = computeMACD(bars);
+      const histData = bars.map((_, i) => histogram.get(i) ?? null);
+      const macdData = bars.map((_, i) => macd.get(i) ?? null);
+      const signalData = bars.map((_, i) => signal.get(i) ?? null);
+      return {
+        ...baseOption,
+        graphic: [
+          { type: "text", left: 8, top: 6, style: { text: "MACD", fill: "rgba(56,189,248,0.6)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" }, z: 10 },
+          { type: "text", left: 46, top: 6, style: { text: "Signal", fill: "rgba(251,191,36,0.6)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" }, z: 10 },
+        ],
+        series: [
+          {
+            type: "bar",
+            data: histData.map((v) => ({ value: v, itemStyle: { color: v != null && v >= 0 ? "rgba(83,255,132,0.3)" : "rgba(248,113,113,0.3)" } })),
+          },
+          { type: "line", data: macdData, symbol: "none", lineStyle: { color: "rgba(56,189,248,0.7)", width: 1 } },
+          { type: "line", data: signalData, symbol: "none", lineStyle: { color: "rgba(251,191,36,0.7)", width: 1 } },
+        ],
+      };
     }
-  }
-}
 
-// Heatmap color: intensity 0..1 -> green (bid) or red (ask)
-function obHeatColor(volume: number, maxVol: number, isBid: boolean): string {
-  const intensity = Math.min(1, Math.sqrt(volume / maxVol));
-  const alpha = 0.15 + intensity * 0.65;
-  return isBid
-    ? `rgba(83,255,132,${alpha.toFixed(3)})`
-    : `rgba(248,113,113,${alpha.toFixed(3)})`;
-}
-
-function drawOrderbookHeatmap(
-  ctx: CanvasRenderingContext2D,
-  s: DrawState,
-  obData: OrderbookSnapshot | null,
-) {
-  if (!obData || (!obData.bids.length && !obData.asks.length)) return;
-  const { padLeft, padTop, chartH, chartW, lo, hi, priceToY } = s;
-
-  let maxVol = 0;
-  for (const lvl of [...obData.bids, ...obData.asks]) {
-    if (lvl.volume > maxVol) maxVol = lvl.volume;
-  }
-  if (maxVol === 0) return;
-
-  const rightEdge = padLeft + chartW;
-  const obWidth = chartW * 0.35;
-  const allLevels = [...obData.bids, ...obData.asks];
-  if (allLevels.length < 2) return;
-
-  const prices = allLevels.map(l => l.price).sort((a, b) => a - b);
-  const priceStep = prices.length > 1 ? prices[1] - prices[0] : 1;
-  const barH = Math.max(1.5, Math.abs(priceToY(prices[0]) - priceToY(prices[0] + priceStep)));
-
-  const bidSet = new Set(obData.bids);
-
-  for (const lvl of allLevels) {
-    if (lvl.price < lo || lvl.price > hi) continue;
-    const y = priceToY(lvl.price);
-    const barTop = y - barH / 2;
-    if (barTop < padTop - barH || barTop > padTop + chartH) continue;
-
-    const isBid = bidSet.has(lvl);
-    const barW = Math.max(2, (lvl.volume / maxVol) * obWidth);
-
-    ctx.fillStyle = obHeatColor(lvl.volume, maxVol, isBid);
-    // Draw from right edge going left
-    ctx.fillRect(rightEdge - barW, barTop, barW, barH + 0.5);
+    // zscore
+    const zscore = computeZScore(bars);
+    const data = bars.map((_, i) => {
+      const v = zscore.get(i);
+      return v != null ? Math.max(-5, Math.min(5, v)) : null;
+    });
+    return {
+      ...baseOption,
+      yAxis: [{ ...baseOption.yAxis as any, min: -5, max: 5, splitLine: { show: true, lineStyle: { color: "rgba(255,255,255,0.1)", type: "dashed" } } }] as any,
+      graphic: [{ type: "text", left: 8, top: 6, style: { text: "Z-Score 20", fill: "rgba(251,191,36,0.6)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" }, z: 10 }],
+      series: [{
+        type: "line", data, symbol: "none",
+        lineStyle: { color: "rgba(251,191,36,0.8)", width: 1.2 },
+        markArea: {
+          silent: true,
+          data: [
+            [{ yAxis: 2, itemStyle: { color: "rgba(248,113,113,0.04)" } }, { yAxis: 5 }],
+            [{ yAxis: -5, itemStyle: { color: "rgba(83,255,132,0.04)" } }, { yAxis: -2 }],
+          ],
+        },
+        markLine: {
+          silent: true, symbol: "none",
+          data: [-2, -1, 0, 1, 2].map(v => ({
+            yAxis: v,
+            lineStyle: { color: v === 0 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.1)", type: "dashed", width: v === 0 ? 0.8 : 0.5 },
+          })),
+          label: { show: true, position: "insideEndTop", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace", color: "rgba(255,255,255,0.3)" },
+        },
+      }],
+    };
   }
 
-  // Label
-  ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-  ctx.fillStyle = "rgba(255,255,255,0.3)";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "top";
-  ctx.fillText("OB Depth", rightEdge - 4, padTop + 2);
-  ctx.textAlign = "left";
-}
+  // ─── Internal: build graphic elements (drawings overlay) ───
 
-function drawDepthChart(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  obData: OrderbookSnapshot | null,
-) {
-  ctx.clearRect(0, 0, w, h);
+  private buildGraphicElements(): any[] {
+    const inst = this.chart;
+    const bars = this.bars;
+    if (!inst || !bars.length) return [];
 
-  const padRight = 56;
-  const padLeft = 4;
-  const padTop = 4;
-  const padBottom = 4;
-  const chartW = w - padLeft - padRight;
-  const chartH = h - padTop - padBottom;
+    const elems: any[] = [];
 
-  if (chartW < 20 || chartH < 10 || !obData) return;
+    // Get grid bounds for candlestick area
+    try {
+      const model = (inst as any).getModel();
+      const gridModel = model.getComponent("grid", 0);
+      if (gridModel) {
+        const coordSys = (inst as any).coordinateSystem;
+        if (coordSys) {
+          const gridRect = gridModel.coordinateSystem.getRect();
+          const leftX = gridRect.x;
+          const topY = gridRect.y;
 
-  // Background fill
-  ctx.fillStyle = "rgba(255,255,255,0.015)";
-  ctx.fillRect(padLeft, padTop, chartW, chartH);
-
-  if (!obData.bids.length && !obData.asks.length) return;
-
-  // Build cumulative depth
-  const bids = [...obData.bids].sort((a, b) => b.price - a.price); // descending from mid
-  const asks = [...obData.asks].sort((a, b) => a.price - b.price); // ascending from mid
-
-  let cumBid = 0;
-  const bidCurve: { price: number; cum: number }[] = [];
-  for (const b of bids) { cumBid += b.volume; bidCurve.push({ price: b.price, cum: cumBid }); }
-
-  let cumAsk = 0;
-  const askCurve: { price: number; cum: number }[] = [];
-  for (const a of asks) { cumAsk += a.volume; askCurve.push({ price: a.price, cum: cumAsk }); }
-
-  const maxCum = Math.max(cumBid, cumAsk);
-  if (maxCum === 0) return;
-
-  // Price range: compute from OB data itself, zoom around mid price
-  const midPrice = (bids[0]?.price + asks[0]?.price) / 2;
-  // Use the price spread of the inner ~80% of levels to determine visible range
-  const allPrices = [...bids.map(b => b.price), ...asks.map(a => a.price)].sort((a, b) => a - b);
-  const p5 = allPrices[Math.floor(allPrices.length * 0.05)] ?? midPrice;
-  const p95 = allPrices[Math.floor(allPrices.length * 0.95)] ?? midPrice;
-  const dataSpread = Math.max(p95 - p5, midPrice * 0.001); // at least 0.1% of price
-  const lo = midPrice - dataSpread;
-  const hi = midPrice + dataSpread;
-  const totalRange = hi - lo || 1;
-
-  const priceToY = (p: number) => padTop + chartH - ((p - lo) / totalRange) * chartH;
-  const cumToX = (c: number) => padLeft + (c / maxCum) * chartW;
-
-  // Draw cumulative bid area (green) — step curve for classic depth look
-  if (bidCurve.length >= 2) {
-    ctx.beginPath();
-    ctx.moveTo(padLeft, priceToY(bidCurve[0].price));
-    for (let i = 0; i < bidCurve.length; i++) {
-      const pt = bidCurve[i];
-      const x = cumToX(pt.cum);
-      const y = priceToY(pt.price);
-      if (i > 0) {
-        ctx.lineTo(x, priceToY(bidCurve[i - 1].price));
+          // EMA legend
+          elems.push({
+            type: "text", left: leftX + 4, top: topY + 2,
+            style: { text: "EMA 20", fill: "rgba(255,255,100,0.5)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" },
+            z: 10, silent: true,
+          });
+          elems.push({
+            type: "text", left: leftX + 56, top: topY + 2,
+            style: { text: "EMA 50", fill: "rgba(147,130,220,0.6)", fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace" },
+            z: 10, silent: true,
+          });
+        }
       }
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(padLeft, priceToY(bidCurve[bidCurve.length - 1].price));
-    ctx.closePath();
-    ctx.fillStyle = "rgba(83,255,132,0.18)";
-    ctx.fill();
+    } catch { /* skip legend */ }
 
-    ctx.strokeStyle = "rgba(83,255,132,0.8)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(cumToX(bidCurve[0].cum), priceToY(bidCurve[0].price));
-    for (let i = 1; i < bidCurve.length; i++) {
-      const pt = bidCurve[i];
-      ctx.lineTo(cumToX(pt.cum), priceToY(bidCurve[i - 1].price));
-      ctx.lineTo(cumToX(pt.cum), priceToY(pt.price));
-    }
-    ctx.stroke();
-  }
-
-  // Draw cumulative ask area (red)
-  if (askCurve.length >= 2) {
-    ctx.beginPath();
-    ctx.moveTo(padLeft, priceToY(askCurve[0].price));
-    for (let i = 0; i < askCurve.length; i++) {
-      const pt = askCurve[i];
-      const x = cumToX(pt.cum);
-      const y = priceToY(pt.price);
-      if (i > 0) {
-        ctx.lineTo(x, priceToY(askCurve[i - 1].price));
+    // Volume Profile overlay
+    if (this.showVP && this.vpData.length > 0) {
+      const vpData = this.vpData;
+      let maxVol = 0;
+      for (const row of vpData) {
+        const total = row.buy + row.sell;
+        if (total > maxVol) maxVol = total;
       }
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(padLeft, priceToY(askCurve[askCurve.length - 1].price));
-    ctx.closePath();
-    ctx.fillStyle = "rgba(248,113,113,0.18)";
-    ctx.fill();
+      if (maxVol > 0) {
+        const vpStep = vpData.length > 1 ? Math.abs(vpData[1].price - vpData[0].price) : 3;
+        try {
+          const model = (inst as any).getModel();
+          const gridModel = model.getComponent("grid", 0);
+          if (gridModel) {
+            const rect = gridModel.coordinateSystem.getRect();
+            const rightEdgeX = rect.x + rect.width;
+            const vpWidth = rect.width * 0.25;
 
-    ctx.strokeStyle = "rgba(248,113,113,0.8)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(cumToX(askCurve[0].cum), priceToY(askCurve[0].price));
-    for (let i = 1; i < askCurve.length; i++) {
-      const pt = askCurve[i];
-      ctx.lineTo(cumToX(pt.cum), priceToY(askCurve[i - 1].price));
-      ctx.lineTo(cumToX(pt.cum), priceToY(pt.price));
-    }
-    ctx.stroke();
-  }
+            for (const row of vpData) {
+              const pY = this.dataToPixel(0, row.price);
+              if (!pY) continue;
+              const y = pY[1];
+              const barH = Math.max(1, Math.abs(pY[1] - (this.dataToPixel(0, row.price + vpStep)?.[1] ?? y)));
+              const total = row.buy + row.sell;
+              const buyRatio = row.buy / total;
+              const barW = Math.max(1, (total / maxVol) * vpWidth);
+              const buyW = barW * buyRatio;
+              const sellW = barW - buyW;
+              const x = rightEdgeX - barW;
 
+              if (sellW > 0) {
+                elems.push({
+                  type: "rect", shape: { x, y: y - barH / 2, width: sellW, height: barH },
+                  style: { fill: "rgba(248,113,113,0.18)" }, z: -1, silent: true,
+                });
+              }
+              if (buyW > 0) {
+                elems.push({
+                  type: "rect", shape: { x: x + sellW, y: y - barH / 2, width: buyW, height: barH },
+                  style: { fill: "rgba(83,255,132,0.18)" }, z: -1, silent: true,
+                });
+              }
+            }
+          }
+        } catch { /* skip VP */ }
+      }
+    }
+
+    // Trendlines
+    for (const tl of this.trendlines) {
+      const si = findBarIndexByTime(bars, tl.startTime);
+      const ei = findBarIndexByTime(bars, tl.endTime);
+      const p1 = this.dataToPixel(si, tl.startPrice);
+      const p2 = this.dataToPixel(ei, tl.endPrice);
+      if (!p1 || !p2) continue;
+
+      const isSelected = tl.id === this.selectedTlId;
+
+      if (tl.kind === "fib") {
+        const hi = Math.max(tl.startPrice, tl.endPrice);
+        const lo = Math.min(tl.startPrice, tl.endPrice);
+        const range = hi - lo;
+        if (range <= 0) continue;
+
+        try {
+          const model = (inst as any).getModel();
+          const gridModel = model.getComponent("grid", 0);
+          if (gridModel) {
+            const rect = gridModel.coordinateSystem.getRect();
+            const fullLeft = rect.x;
+            const fullRight = rect.x + rect.width;
+
+            for (const { r, label } of FIB_LEVELS) {
+              const price = hi - range * r;
+              const py = this.dataToPixel(si, price);
+              if (!py) continue;
+              const y = py[1];
+              const color = FIB_COLORS[label] || "#888";
+
+              elems.push({
+                type: "line", shape: { x1: fullLeft, y1: y, x2: fullRight, y2: y },
+                style: { stroke: color + "55", lineWidth: 1 }, z: 2, silent: true, lineDash: [4, 3],
+              });
+
+              const labelText = `${label}  ${fmtPrice(price)}`;
+              elems.push({
+                type: "rect", shape: { x: fullRight - 90 - 2, y: y - 7, width: 92, height: 13, r: 3 },
+                style: { fill: color + "20" }, z: 2, silent: true,
+              });
+              elems.push({
+                type: "text", x: fullRight - 90 + 2, y: y - 0.5,
+                style: { text: labelText, fill: color, fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, monospace", textVerticalAlign: "middle" },
+                z: 3, silent: true,
+              });
+            }
+          }
+        } catch { /* skip fib grid */ }
+
+        // Diagonal line
+        elems.push({
+          type: "line", shape: { x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] },
+          style: { stroke: tl.color + "aa", lineWidth: 1.5 }, z: 3, silent: true,
+        });
+      }
+
+      if (tl.kind !== "fib") {
+        elems.push({
+          type: "line", shape: { x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1] },
+          style: { stroke: tl.color, lineWidth: 1.5, opacity: 0.85 }, z: 3, silent: true,
+        });
+      }
+
+      // Endpoint handles
+      const handleR = isSelected ? 6 : 4;
+      for (const [cx, cy] of [p1, p2]) {
+        elems.push({
+          type: "circle", shape: { cx, cy, r: handleR },
+          style: { fill: isSelected ? "#fff" : tl.color, stroke: tl.color, lineWidth: isSelected ? 2 : 0 },
+          z: 4, silent: true,
+        });
+      }
+    }
+
+<<<<<<< HEAD
   // Mid price line
   const midY = priceToY(midPrice);
   ctx.strokeStyle = "rgba(255,255,255,0.2)";
@@ -906,48 +1453,95 @@ function drawChart(
           ctx.strokeStyle = tl.color;
           ctx.lineWidth = 2;
           ctx.stroke();
+=======
+    // Measure overlay
+    if (this.measureRef) {
+      const { x1, x2 } = this.measureRef;
+      const d1 = this.pixelToData(x1, 0);
+      const d2 = this.pixelToData(x2, 0);
+      if (d1 && d2 && d1.idx !== d2.idx) {
+        const a = d1.idx < d2.idx ? d1.idx : d2.idx;
+        const b = d1.idx < d2.idx ? d2.idx : d1.idx;
+        const p1 = bars[a].close;
+        const p2 = bars[b].close;
+        const diff = p2 - p1;
+        const pct = (diff / p1) * 100;
+        const isUp = diff >= 0;
+        const color = isUp ? "#22c55e" : "#f87171";
+        const pa = this.dataToPixel(a, p1);
+        const pb = this.dataToPixel(b, p2);
+        if (pa && pb) {
+          for (const px of [pa[0], pb[0]]) {
+            elems.push({
+              type: "line", shape: { x1: px, y1: pa[1] - 40, x2: px, y2: pb[1] + 40 },
+              style: { stroke: color, lineDash: [4, 4], opacity: 0.45, lineWidth: 1 }, z: 5, silent: true,
+            });
+          }
+          for (const [cx, cy] of [pa, pb]) {
+            elems.push({ type: "circle", shape: { cx, cy, r: 3.5 }, style: { fill: color }, z: 5, silent: true });
+          }
+          elems.push({
+            type: "line", shape: { x1: pa[0], y1: pa[1], x2: pb[0], y2: pb[1] },
+            style: { stroke: color, lineWidth: 1.5 }, z: 5, silent: true,
+          });
+          const midX = (pa[0] + pb[0]) / 2;
+          const midY = (pa[1] + pb[1]) / 2;
+          const label = `${isUp ? "+" : ""}${pct.toFixed(2)}%`;
+          elems.push({
+            type: "rect", shape: { x: midX - 40, y: midY - 20, width: 80, height: 40, r: 6 },
+            style: { fill: color }, z: 6, silent: true,
+          });
+          elems.push({
+            type: "text", x: midX, y: midY - 6,
+            style: { text: label, fill: "#0a0a0a", fontSize: 14, fontWeight: 700, fontFamily: "ui-monospace, SFMono-Regular, monospace", textAlign: "center", textVerticalAlign: "middle" },
+            z: 7, silent: true,
+          });
+>>>>>>> d246df0 (fix: bypass broken ECharts 6 graphic component - draw directly on zrender canvas)
         }
       }
     }
+
+    return elems;
   }
 
-  // Volume bars
-  const volBase = padTop + chartH + volH;
-  for (let i = 0; i < visibleBars.length; i++) {
-    const b = visibleBars[i];
-    const x = padLeft + barWidth * i + barWidth / 2;
-    const isUp = b.close >= b.open;
-    const volBarH = b.volume * volScale;
-    ctx.fillStyle = isUp ? "rgba(83,255,132,0.15)" : "rgba(248,113,113,0.15)";
-    ctx.fillRect(x - bodyWidth / 2, volBase - volBarH, bodyWidth, volBarH);
+  // ─── Internal: render ───
+
+  private _renderTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private scheduleRender(): void {
+    if (this._destroyed) return;
+    if (this._renderTimer) clearTimeout(this._renderTimer);
+    this._renderTimer = setTimeout(() => {
+      this._renderTimer = null;
+      this.render();
+    }, 16); // ~60fps debounce
   }
 
-  // Volume separator
-  ctx.strokeStyle = "rgba(255,255,255,0.06)";
-  ctx.beginPath(); ctx.moveTo(padLeft, volBase); ctx.lineTo(w - padRight, volBase); ctx.stroke();
+  private scheduleRefresh(): void {
+    setTimeout(() => this.doLoadBars(true), 16);
+  }
 
-  // EMAs
-  const ema20 = computeEMA(bars, 20);
-  const ema50 = computeEMA(bars, 50);
-  const emas: { color: string; map: Map<number, number>; label: string }[] = [
-    { color: "rgba(255,255,100,0.5)", map: ema20, label: "EMA 20" },
-    { color: "rgba(147,130,220,0.6)", map: ema50, label: "EMA 50" },
-  ];
-  for (const { color, map } of emas) {
-    if (map.size > 1) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      let started = false;
-      for (let i = vs; i < s.viewEnd; i++) {
-        const val = map.get(i);
-        if (val == null) continue;
-        const localIdx = i - vs;
-        const x = padLeft + barWidth * localIdx + barWidth / 2;
-        const y = priceToY(val);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
+  private render(): void {
+    const inst = this.chart;
+    if (!inst || !this.bars.length) {
+      this.setStatus({ loading: false, error: false, empty: true });
+      return;
+    }
+    this.setStatus({ loading: false, error: false, empty: false });
+
+    const option = this.buildMainOption();
+    inst.setOption(option, true);
+
+    // Update graphic elements after chart renders
+    requestAnimationFrame(() => {
+      if (!this.chart) return;
+      const graphics = this.buildGraphicElements();
+      if (graphics && Array.isArray(graphics) && graphics.length > 0) {
+        this.chart!.setOption({ graphic: graphics as any });
+      } else {
+        this.chart!.setOption({ graphic: [] });
       }
+<<<<<<< HEAD
       ctx.stroke();
     }
   }
@@ -1109,9 +1703,18 @@ function drawChart(
       ctx.fillStyle = color;
       ctx.fillText(label, legendX, legendY);
       legendX += ctx.measureText(label).width + 10;
+=======
+>>>>>>> d246df0 (fix: bypass broken ECharts 6 graphic component - draw directly on zrender canvas)
     });
+
+    // Indicator chart
+    if (this.indicator !== "none" && this.indChart) {
+      const indOption = this.buildIndicatorOption();
+      this.indChart.setOption(indOption, true);
+    }
   }
 
+<<<<<<< HEAD
   // Price labels (right axis) - skip some for small charts
   ctx.fillStyle = "rgba(255,255,255,0.5)";
   ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
@@ -1124,354 +1727,434 @@ function drawChart(
     const label = fmtPrice(p);
     ctx.fillStyle = "rgba(255,255,255,0.5)";
     ctx.fillText(label, w - padRight + 6, y);
+=======
+  private renderIndicator(): void {
+    if (this.indChart && this.indicator !== "none" && this.bars.length) {
+      const indOption = this.buildIndicatorOption();
+      this.indChart.setOption(indOption, true);
+    }
+>>>>>>> d246df0 (fix: bypass broken ECharts 6 graphic component - draw directly on zrender canvas)
   }
 
-  // Time labels
-  if (visibleBars.length > 1) {
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+  // ─── Internal: event binding ───
 
-    const labelCount = visibleBars.length <= 8 ? visibleBars.length : Math.min(4, Math.floor(chartW / 80));
-    const step = Math.max(1, Math.floor(visibleBars.length / labelCount));
-
-    for (let i = 0; i < visibleBars.length; i += step) {
-      const t = parseTime(visibleBars[i].time);
-      const x = padLeft + barWidth * i + barWidth / 2;
-      const label = subDaily
-        ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
-        : new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
-      ctx.fillText(label, x, h - padBottom + 4);
-    }
-    const lastX = padLeft + barWidth * (visibleBars.length - 1) + barWidth / 2;
-    const lastT = parseTime(visibleBars[visibleBars.length - 1].time);
-    const lastLabel = subDaily
-      ? new Date(lastT).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
-      : new Date(lastT).toLocaleDateString([], { month: "short", day: "numeric" });
-    ctx.fillText(lastLabel, lastX, h - padBottom + 4);
+  private getPos(e: any): { x: number; y: number } {
+    const rect = this.dom.getBoundingClientRect();
+    const touch = e.touches?.[0] || e;
+    return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
   }
 
-  // Right axis separator
-  ctx.strokeStyle = "rgba(255,255,255,0.06)";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(w - padRight, padTop); ctx.lineTo(w - padRight, h - padBottom); ctx.stroke();
-}
-
-function drawIndicator(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  bars: Bar[],
-  viewStart: number,
-  viewEnd: number,
-  type: "macd" | "rsi" | "zscore",
-  subDaily: boolean,
-) {
-  ctx.clearRect(0, 0, w, h);
-  const padRight = 56;
-  const padLeft = 4;
-  const padTop = 4;
-  const padBottom = 18;
-  const chartW = w - padLeft - padRight;
-  const chartH = h - padTop - padBottom;
-
-  if (chartW < 20 || chartH < 10 || !bars.length) return;
-
-  const vs = Math.max(0, Math.min(viewStart, bars.length - 1));
-  const ve = Math.max(1, Math.min(viewEnd, bars.length));
-  const barWidth = chartW / (ve - vs);
-
-  // Separator
-  ctx.strokeStyle = "rgba(255,255,255,0.06)";
-  ctx.beginPath(); ctx.moveTo(padLeft, padTop); ctx.lineTo(w - padRight, padTop); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(w - padRight, padTop); ctx.lineTo(w - padRight, h - padBottom); ctx.stroke();
-
-  if (type === "rsi") {
-    const rsi = computeRSI(bars);
-    if (rsi.size < 2) return;
-
-    // Overbought/oversold zones
-    const yToVal = (y: number) => 100 - ((y - padTop) / chartH) * 100;
-    const valToY = (v: number) => padTop + chartH - (v / 100) * chartH;
-
-    // 70/30 zones
-    ctx.fillStyle = "rgba(248,113,113,0.04)";
-    ctx.fillRect(padLeft, valToY(100), chartW, valToY(70) - valToY(100));
-    ctx.fillStyle = "rgba(83,255,132,0.04)";
-    ctx.fillRect(padLeft, valToY(30), chartW, valToY(0) - valToY(30));
-
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(255,255,255,0.1)";
-    ctx.lineWidth = 0.5;
-    for (const v of [70, 30, 50]) {
-      const y = valToY(v);
-      ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
+  private updateTrendline(tl: TrendLine): void {
+    if (this.config.onTrendlineUpdate) {
+      this.config.onTrendlineUpdate(tl);
+    } else {
+      this.trendlines = this.trendlines.map(t => t.id === tl.id ? tl : t);
+      this.scheduleRender();
     }
-    ctx.setLineDash([]);
+  }
 
-    // RSI line
-    ctx.strokeStyle = "rgba(168,85,247,0.7)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    let started = false;
-    for (let i = vs; i < ve; i++) {
-      const val = rsi.get(i);
-      if (val == null) continue;
-      const x = padLeft + (i - vs + 0.5) * barWidth;
-      const y = valToY(val);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
+  private bindEvents(): void {
+    const zr = this.chart?.getZr();
+    if (!zr) return;
+
+    const onWheel = (e: any) => {
+      const rect = this.dom.getBoundingClientRect();
+      const mx = e.offsetX;
+      const chartW = rect.width;
+      const rightPad = 56;
+
+      if (mx > chartW - rightPad) {
+        try {
+          const inst = this.chart;
+          if (!inst) return;
+          const opt = inst.getOption() as any;
+          const yMin = opt.yAxis?.[0]?.min;
+          const yMax = opt.yAxis?.[0]?.max;
+          if (yMin == null || yMax == null) return;
+
+          const priceAtMouse = inst.convertFromPixel({ yAxisIndex: 0 }, [0, e.offsetY])?.[1];
+          if (priceAtMouse == null) return;
+
+          const delta = e.event.deltaY || (e.event.wheelDelta || 0);
+          const zoomFactor = delta > 0 ? 1.15 : 1 / 1.15;
+          const currentRange = yMax - yMin;
+          const newRange = Math.max(currentRange * 0.02, Math.min(currentRange * 50, currentRange * zoomFactor));
+          const ratio = (priceAtMouse - yMin) / currentRange;
+          const newYMin = priceAtMouse - newRange * ratio;
+          const newYMax = priceAtMouse + newRange * (1 - ratio);
+
+          this.priceZoom = { min: newYMin, max: newYMax };
+          setTimeout(() => {
+            if (!this.chart) return;
+            this.chart.setOption({ yAxis: [{ min: newYMin, max: newYMax }] });
+            const graphics = this.buildGraphicElements();
+            this.chart.setOption({ graphic: graphics as any });
+          }, 0);
+        } catch { /* skip */ }
+      }
+    };
+
+    const onMousedown = (e: any) => {
+      const inst = this.chart;
+      if (!inst || !this.bars.length) return;
+      const pos = this.getPos(e);
+      const { x, y } = pos;
+
+      // Shift+click → measure tool
+      if (e.event?.shiftKey || e.shiftKey) {
+        this.measureRef = { x1: x, x2: x };
+        this.measureActive = true;
+        this.selectedTlId = null;
+        this.onTrendlineSelect?.(null);
+        this.scheduleRender();
+        return;
+      }
+
+      // Hit-test trendlines
+      const hit = this.hitTestTrendline(x, y);
+      if (hit) {
+        this.selectedTlId = hit.tl.id;
+        this.onTrendlineSelect?.(hit.tl.id);
+        this.dragRef = {
+          tlId: hit.tl.id,
+          mode: hit.mode,
+          startPixelX: x,
+          startPixelY: y,
+          origTl: { ...hit.tl },
+        };
+        return;
+      }
+
+      // Price axis zone: start price zoom drag
+      const rect = this.dom.getBoundingClientRect();
+      if (x > rect.width - 56) {
+        const opt = inst.getOption() as any;
+        const yMin = opt.yAxis?.[0]?.min;
+        const yMax = opt.yAxis?.[0]?.max;
+        if (yMin != null && yMax != null) {
+          this.priceZoomDragRef = { startY: e.offsetY ?? y, origMin: yMin, origMax: yMax };
+        }
+        return;
+      }
+
+      // Empty space — pan handled by ECharts' inside dataZoom
+      this.selectedTlId = null;
+      this.onTrendlineSelect?.(null);
+      this.dragRef = null;
+    };
+
+    const onMousemove = (e: any) => {
+      const inst = this.chart;
+      if (!inst || !this.bars.length) return;
+      const pos = this.getPos(e);
+      const { x, y } = pos;
+
+      // Price axis zoom drag
+      if (this.priceZoomDragRef && (e.buttons === 1 || (e.event && e.event.buttons === 1))) {
+        const dy = y - this.priceZoomDragRef.startY;
+        const anchor = this.priceZoomDragRef;
+        const origRange = anchor.origMax - anchor.origMin;
+        const zoomFactor = Math.exp(-dy * 0.005);
+        const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
+        const mid = (anchor.origMin + anchor.origMax) / 2;
+        const newYMin = mid - newRange / 2;
+        const newYMax = mid + newRange / 2;
+        this.priceZoom = { min: newYMin, max: newYMax };
+        setTimeout(() => {
+          if (!this.chart) return;
+          this.chart.setOption({ yAxis: [{ min: newYMin, max: newYMax }] });
+          const graphics = this.buildGraphicElements();
+          this.chart.setOption({ graphic: graphics as any });
+        }, 0);
+        return;
+      }
+
+      // Measure drag
+      if (this.measureActive && (e.buttons === 1 || (e.event && e.event.buttons === 1))) {
+        this.measureRef = { x1: this.measureRef!.x1, x2: x };
+        setTimeout(() => {
+          if (!this.chart) return;
+          const graphics = this.buildGraphicElements();
+          this.chart.setOption({ graphic: graphics as any });
+        }, 0);
+        return;
+      }
+
+      // Trendline drag
+      if (this.dragRef && (e.buttons === 1 || (e.event && e.event.buttons === 1))) {
+        const data = this.pixelToData(x, y);
+        if (!data) return;
+        let { idx, price } = this.magnet ? this.snapToOHLC(data.idx, data.price) : data;
+        const drag = this.dragRef;
+        const orig = drag.origTl;
+
+        const bars = this.bars;
+        const clampIdx = Math.max(0, Math.min(bars.length - 1, idx));
+        const barTime = parseTime(bars[clampIdx].time);
+
+        const startData = this.pixelToData(drag.startPixelX, drag.startPixelY);
+        const startIdx = startData ? Math.max(0, Math.min(bars.length - 1, startData.idx)) : clampIdx;
+        const startBarTime = parseTime(bars[startIdx].time);
+        const startPrice = startData?.price ?? orig.startPrice;
+        const snapResult: { idx: number; price: number } = this.magnet ? this.snapToOHLC(startIdx, startPrice) : { idx: startIdx, price: startPrice };
+        const startP = snapResult.price;
+
+        const dt = barTime - startBarTime;
+        const dp = price - startP;
+
+        const updated: TrendLine = { ...orig };
+        if (drag.mode === "start") {
+          updated.startTime = orig.startTime + dt;
+          updated.startPrice = orig.startPrice + dp;
+        } else if (drag.mode === "end") {
+          updated.endTime = orig.endTime + dt;
+          updated.endPrice = orig.endPrice + dp;
+        } else {
+          updated.startTime = orig.startTime + dt;
+          updated.endTime = orig.endTime + dt;
+          updated.startPrice = orig.startPrice + dp;
+          updated.endPrice = orig.endPrice + dp;
+        }
+        this.updateTrendline(updated);
+        return;
+      }
+    };
+
+    const onMouseup = (_e: any) => {
+      this.priceZoomDragRef = null;
+      this.dragRef = null;
+      if (this.measureActive) {
+        this.measureActive = false;
+        this.measureRef = null;
+        this.scheduleRender();
+      }
+    };
+
+    const onTouchstart = (e: any) => {
+      if (this.longPressRef.timer) {
+        clearTimeout(this.longPressRef.timer);
+        this.longPressRef.timer = null;
+      }
+
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        this.pinchRef = {
+          active: true,
+          dist: Math.sqrt(dx * dx + dy * dy),
+          startDz: { ...this.dz },
+        };
+      } else if (e.touches.length === 1 && !this.pinchRef.active) {
+        const pos = this.getPos(e);
+        const { x, y } = pos;
+
+        const hit = this.hitTestTrendline(x, y);
+        if (hit) {
+          this.selectedTlId = hit.tl.id;
+          this.onTrendlineSelect?.(hit.tl.id);
+          this.dragRef = {
+            tlId: hit.tl.id,
+            mode: hit.mode,
+            startPixelX: x,
+            startPixelY: y,
+            origTl: { ...hit.tl },
+          };
+          return;
+        }
+
+        // Price axis zone
+        const rect = this.dom.getBoundingClientRect();
+        if (x > rect.width - 56) {
+          const inst = this.chart;
+          if (inst) {
+            const opt = inst.getOption() as any;
+            const yMin = opt.yAxis?.[0]?.min;
+            const yMax = opt.yAxis?.[0]?.max;
+            if (yMin != null && yMax != null) {
+              this.priceZoomDragRef = { startY: y, origMin: yMin, origMax: yMax };
+            }
+          }
+          return;
+        }
+
+        // Long-press → measure mode
+        const cx = e.touches[0].clientX;
+        const cy = e.touches[0].clientY;
+        this.longPressRef = {
+          x: cx, y: cy,
+          timer: setTimeout(() => {
+            if (this.bars.length) {
+              const r = this.dom.getBoundingClientRect();
+              const fx = cx - r.left;
+              this.measureRef = { x1: fx, x2: fx };
+              this.measureActive = true;
+              this.scheduleRender();
+            }
+          }, 300),
+        };
+      }
+    };
+
+    const onTouchmove = (e: any) => {
+      if (!this.chart || !this.bars.length) return;
+
+      // Price axis zoom drag
+      if (this.priceZoomDragRef && e.touches.length === 1) {
+        const pos = this.getPos(e);
+        const dy = pos.y - this.priceZoomDragRef.startY;
+        const anchor = this.priceZoomDragRef;
+        const origRange = anchor.origMax - anchor.origMin;
+        const zoomFactor = Math.exp(-dy * 0.005);
+        const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
+        const mid = (anchor.origMin + anchor.origMax) / 2;
+        this.priceZoom = { min: mid - newRange / 2, max: mid + newRange / 2 };
+        this.chart.setOption({ yAxis: [{ min: mid - newRange / 2, max: mid + newRange / 2 }] });
+        return;
+      }
+
+      // Trendline drag
+      if (this.dragRef && e.touches.length === 1) {
+        const pos = this.getPos(e);
+        const data = this.pixelToData(pos.x, pos.y);
+        if (!data) return;
+        let { idx, price } = this.magnet ? this.snapToOHLC(data.idx, data.price) : data;
+        const drag = this.dragRef;
+        const orig = drag.origTl;
+        const bars = this.bars;
+        const clampIdx = Math.max(0, Math.min(bars.length - 1, idx));
+        const barTime = parseTime(bars[clampIdx].time);
+
+        const startData = this.pixelToData(drag.startPixelX, drag.startPixelY);
+        const startIdx = startData ? Math.max(0, Math.min(bars.length - 1, startData.idx)) : clampIdx;
+        const startBarTime = parseTime(bars[startIdx].time);
+        const startPrice = startData?.price ?? orig.startPrice;
+        const dt = barTime - startBarTime;
+        const dp = price - startPrice;
+
+        const updated: TrendLine = { ...orig };
+        if (drag.mode === "start") {
+          updated.startTime = orig.startTime + dt;
+          updated.startPrice = orig.startPrice + dp;
+        } else if (drag.mode === "end") {
+          updated.endTime = orig.endTime + dt;
+          updated.endPrice = orig.endPrice + dp;
+        } else {
+          updated.startTime = orig.startTime + dt;
+          updated.endTime = orig.endTime + dt;
+          updated.startPrice = orig.startPrice + dp;
+          updated.endPrice = orig.endPrice + dp;
+        }
+        this.updateTrendline(updated);
+        return;
+      }
+
+      if (this.measureActive && e.touches.length === 1) {
+        const pos = this.getPos(e);
+        this.measureRef = { x1: this.measureRef!.x1, x2: pos.x };
+        setTimeout(() => {
+          if (!this.chart) return;
+          const graphics = this.buildGraphicElements();
+          this.chart.setOption({ graphic: graphics as any });
+        }, 0);
+        return;
+      }
+
+      // Cancel long-press if moved > 10px
+      if (this.longPressRef.timer) {
+        const moved = Math.abs(e.touches[0].clientX - this.longPressRef.x) + Math.abs(e.touches[0].clientY - this.longPressRef.y);
+        if (moved > 10) {
+          clearTimeout(this.longPressRef.timer);
+          this.longPressRef.timer = null;
+        }
+      }
+    };
+
+    const onTouchend = (_e: any) => {
+      if (this.longPressRef.timer) {
+        clearTimeout(this.longPressRef.timer);
+        this.longPressRef.timer = null;
+      }
+      this.pinchRef = { active: false, dist: 0, startDz: { start: 0, end: 0 } };
+      this.dragRef = null;
+      this.priceZoomDragRef = null;
+      if (this.measureActive) {
+        this.measureActive = false;
+        this.measureRef = null;
+        this.scheduleRender();
+      }
+    };
+
+    // Data zoom sync
+    const onDataZoom = () => {
+      requestAnimationFrame(() => {
+        if (!this.chart) return;
+        const opt = this.chart.getOption() as any;
+        if (opt?.dataZoom?.[0]) {
+          this.dz = {
+            start: opt.dataZoom[0].start ?? 0,
+            end: opt.dataZoom[0].end ?? 100,
+          };
+        }
+        // Sync indicator chart
+        if (this.indChart) {
+          this.indChart.setOption({
+            dataZoom: [{ start: this.dz.start, end: this.dz.end }],
+          });
+        }
+        // Re-render graphics
+        setTimeout(() => {
+          if (!this.chart) return;
+          const graphics = this.buildGraphicElements();
+          this.chart.setOption({ graphic: graphics as any });
+        }, 0);
+      });
+    };
+
+    // Store references for cleanup
+    this.boundHandlers = { onWheel, onMousedown, onMousemove, onMouseup, onTouchstart, onTouchmove, onTouchend, onDataZoom };
+
+    zr.on("mousewheel", onWheel);
+    zr.on("mousedown", onMousedown);
+    zr.on("mousemove", onMousemove);
+    zr.on("mouseup", onMouseup);
+    zr.on("touchstart", onTouchstart);
+    zr.on("touchmove", onTouchmove);
+    zr.on("touchend", onTouchend);
+    this.chart?.on("dataZoom", onDataZoom);
+  }
+
+  private unbindEvents(): void {
+    const zr = this.chart?.getZr();
+    if (zr) {
+      zr.off("mousewheel", this.boundHandlers.onWheel);
+      zr.off("mousedown", this.boundHandlers.onMousedown);
+      zr.off("mousemove", this.boundHandlers.onMouseMove);
+      zr.off("mouseup", this.boundHandlers.onMouseup);
+      zr.off("touchstart", this.boundHandlers.onTouchstart);
+      zr.off("touchmove", this.boundHandlers.onTouchmove);
+      zr.off("touchend", this.boundHandlers.onTouchend);
     }
-    ctx.stroke();
+    this.chart?.off("dataZoom", this.boundHandlers.onDataZoom);
+    this.boundHandlers = {};
+  }
 
-    // Labels
-    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    for (const v of [30, 50, 70]) {
-      ctx.fillText(v.toString(), w - padRight + 6, valToY(v));
-    }
+  private cleanupTimers(): void {
+    if (this.refreshTimer) { clearInterval(this.refreshTimer); this.refreshTimer = null; }
+    if (this.vpTimer) { clearInterval(this.vpTimer); this.vpTimer = null; }
+    if (this.longPressRef.timer) { clearTimeout(this.longPressRef.timer); this.longPressRef.timer = null; }
+  }
 
-    // Legend
-    ctx.fillStyle = "rgba(168,85,247,0.6)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("RSI 14", padLeft + 4, padTop + 1);
+  private _lastStatus = { loading: true, error: false, empty: false };
 
-  } else if (type === "macd") {
-    // MACD
-    const { macd, signal, histogram } = computeMACD(bars);
-    if (macd.size < 2) return;
-
-    let minV = Infinity, maxV = -Infinity;
-    for (const v of macd.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
-    for (const v of signal.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
-    for (const v of histogram.values()) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
-    const range = maxV - minV || 1;
-    const pad = range * 0.1;
-    minV -= pad; maxV += pad;
-    const totalRange = maxV - minV;
-    const valToY = (v: number) => padTop + chartH - ((v - minV) / totalRange) * chartH;
-    const zeroY = valToY(0);
-
-    // Zero line
-    ctx.strokeStyle = "rgba(255,255,255,0.1)";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath(); ctx.moveTo(padLeft, zeroY); ctx.lineTo(w - padRight, zeroY); ctx.stroke();
-
-    // Histogram
-    for (let i = vs; i < ve; i++) {
-      const v = histogram.get(i);
-      if (v == null) continue;
-      const x = padLeft + (i - vs + 0.5) * barWidth;
-      const y1 = valToY(0);
-      const y2 = valToY(v);
-      ctx.fillStyle = v >= 0 ? "rgba(83,255,132,0.3)" : "rgba(248,113,113,0.3)";
-      ctx.fillRect(x - barWidth * 0.3, Math.min(y1, y2), barWidth * 0.6, Math.abs(y2 - y1));
-    }
-
-    // MACD line
-    ctx.strokeStyle = "rgba(56,189,248,0.7)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    let started = false;
-    for (let i = vs; i < ve; i++) {
-      const val = macd.get(i);
-      if (val == null) continue;
-      const x = padLeft + (i - vs + 0.5) * barWidth;
-      const y = valToY(val);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    // Signal line
-    ctx.strokeStyle = "rgba(251,191,36,0.7)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    started = false;
-    for (let i = vs; i < ve; i++) {
-      const val = signal.get(i);
-      if (val == null) continue;
-      const x = padLeft + (i - vs + 0.5) * barWidth;
-      const y = valToY(val);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    // Labels
-    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText("0", w - padRight + 6, zeroY);
-
-    // Legend
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "rgba(56,189,248,0.6)";
-    ctx.fillText("MACD", padLeft + 4, padTop + 1);
-    ctx.fillStyle = "rgba(251,191,36,0.6)";
-    ctx.fillText("Signal", padLeft + 42, padTop + 1);
-  } else {
-    // Z-Score
-    const zscore = computeZScore(bars);
-    if (zscore.size < 2) return;
-
-    const range = 5; // -3 to +3 is typical, pad to ±4
-    const valToY = (v: number) => padTop + chartH - ((v + range) / (2 * range)) * chartH;
-
-    // ±2 zones (overbought/oversold)
-    ctx.fillStyle = "rgba(248,113,113,0.04)";
-    ctx.fillRect(padLeft, valToY(range), chartW, valToY(2) - valToY(range));
-    ctx.fillStyle = "rgba(83,255,132,0.04)";
-    ctx.fillRect(padLeft, valToY(-2), chartW, valToY(-range) - valToY(-2));
-
-    // Grid lines at ±1, ±2, 0
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(255,255,255,0.1)";
-    ctx.lineWidth = 0.5;
-    for (const v of [-2, -1, 0, 1, 2]) {
-      const y = valToY(v);
-      ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(w - padRight, y); ctx.stroke();
-    }
-    ctx.setLineDash([]);
-
-    // Zero line (stronger)
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 0.8;
-    const zeroY = valToY(0);
-    ctx.beginPath(); ctx.moveTo(padLeft, zeroY); ctx.lineTo(w - padRight, zeroY); ctx.stroke();
-
-    // Z-score line
-    ctx.strokeStyle = "rgba(251,191,36,0.8)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    let started = false;
-    for (let i = vs; i < ve; i++) {
-      const val = zscore.get(i);
-      if (val == null) continue;
-      const x = padLeft + (i - vs + 0.5) * barWidth;
-      const y = valToY(Math.max(-range, Math.min(range, val)));
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    // Labels
-    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    for (const v of [-2, 0, 2]) {
-      ctx.fillText(v.toString(), w - padRight + 6, valToY(v));
-    }
-
-    // Legend
-    ctx.fillStyle = "rgba(251,191,36,0.6)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("Z-Score 20", padLeft + 4, padTop + 1);
+  private setStatus(status: { loading: boolean; error: boolean; empty: boolean }): void {
+    const prev = this._lastStatus;
+    if (prev.loading === status.loading && prev.error === status.error && prev.empty === status.empty) return;
+    this._lastStatus = status;
+    this.config.onStatusChange?.(status);
   }
 }
 
-function drawMeasureOverlay(
-  ctx: CanvasRenderingContext2D,
-  s: DrawState,
-  bars: Bar[],
-  x1: number,
-  x2: number,
-) {
-  const { padLeft, padTop, chartW, chartH, xToIdx, idxToX, priceToY } = s;
-
-  // Map finger X → bar index (clamped to valid range)
-  let i1 = Math.round(xToIdx(x1));
-  let i2 = Math.round(xToIdx(x2));
-  i1 = Math.max(0, Math.min(bars.length - 1, i1));
-  i2 = Math.max(0, Math.min(bars.length - 1, i2));
-  if (i1 === i2) return;
-
-  const a = i1 < i2 ? i1 : i2; // earlier candle
-  const b = i1 < i2 ? i2 : i1; // later candle
-  const p1 = bars[a].close;
-  const p2 = bars[b].close;
-  const diff = p2 - p1;
-  const pct = (diff / p1) * 100;
-  const isUp = diff >= 0;
-  const color = isUp ? "#22c55e" : "#f87171";
-
-  const xa = idxToX(a);
-  const xb = idxToX(b);
-  const ya = priceToY(p1);
-  const yb = priceToY(p2);
-
-  // Vertical lines at each candle
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.45;
-  ctx.setLineDash([4, 4]);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(xa, padTop);
-  ctx.lineTo(xa, padTop + chartH);
-  ctx.moveTo(xb, padTop);
-  ctx.lineTo(xb, padTop + chartH);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
-
-  // Dots at each candle's close price
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(xa, ya, 3.5, 0, Math.PI * 2);
-  ctx.arc(xb, yb, 3.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Connecting line between the two closes
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(xa, ya);
-  ctx.lineTo(xb, yb);
-  ctx.stroke();
-
-  // Label box at midpoint of the connecting line
-  const midX = (xa + xb) / 2;
-  const midY = (ya + yb) / 2;
-  const label = `${isUp ? "+" : ""}${pct.toFixed(2)}%`;
-  const sub = `${isUp ? "+" : "-"}$${fmtPrice(Math.abs(diff))}`;
-  ctx.font = "700 14px ui-monospace, SFMono-Regular, monospace";
-  const tw = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width);
-  const boxW = tw + 24;
-  const boxH = 40;
-  const boxX = Math.max(padLeft + 2, Math.min(padLeft + chartW - boxW - 2, midX - boxW / 2));
-  const boxY = midY - boxH / 2;
-
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  const r = 6;
-  ctx.moveTo(boxX + r, boxY);
-  ctx.lineTo(boxX + boxW - r, boxY);
-  ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
-  ctx.lineTo(boxX + boxW, boxY + boxH - r);
-  ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
-  ctx.lineTo(boxX + r, boxY + boxH);
-  ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
-  ctx.lineTo(boxX, boxY + r);
-  ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
-  ctx.fill();
-
-  ctx.fillStyle = "#0a0a0a";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, boxX + boxW / 2, boxY + 14);
-  ctx.font = "500 11px ui-monospace, SFMono-Regular, monospace";
-  ctx.fillStyle = "rgba(10,10,10,0.7)";
-  ctx.fillText(sub, boxX + boxW / 2, boxY + 29);
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-}
+// ─── React Component ───
 
 export function CandleChart({
   symbol,
@@ -1483,190 +2166,175 @@ export function CandleChart({
   onTrendlineAdd,
   onTrendlineUpdate,
   onTrendlineRemove,
+  chromeless = false,
+  onApi,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const indicatorCanvasRef = useRef<HTMLCanvasElement>(null);
+  const mainChartRef = useRef<HTMLDivElement>(null);
+  const indChartRef = useRef<HTMLDivElement>(null);
+  const managerRef = useRef<ChartManager | null>(null);
+
   const [days, setDays] = useState(1);
   const [loading, setLoading] = useState(true);
-  const hasLoaded = useRef(false);
   const [error, setError] = useState(false);
   const [empty, setEmpty] = useState(false);
-  const [internalTrendlines, setInternalTrendlines] = useState<TrendLine[]>([]);
-  const [selectedTlId, setSelectedTlId] = useState<number | null>(null);
-  const [indicator, setIndicator] = useState<"none" | "macd" | "rsi" | "zscore">("none");
+  const [indicator, setIndicator] = useState<IndicatorType>("none");
   const [showVP, setShowVP] = useState(false);
-  const vpDataRef = useRef<VPRow[]>([]);
   const [showTape, setShowTape] = useState(false);
   const [logScale, setLogScale] = useState(false);
   const [magnet, setMagnet] = useState(false);
   const [candleType, setCandleType] = useState<"candle" | "heikin">("candle");
   const [showSignals, setShowSignals] = useState(false);
   const [drawTool, setDrawTool] = useState<"line" | "fib">("line");
+  const [selectedTlId, setSelectedTlId] = useState<number | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
-  const nextIdRef = useRef(1);
-  const priceZoomRef = useRef<{ lo: number; hi: number } | null>(null);
-  const priceZoomAnchorRef = useRef<{ y: number; lo: number; hi: number } | null>(null);
-
-  const activeTrendlines = onTrendlineAdd ? trendlines : internalTrendlines;
-  const updateTl = (tl: TrendLine) => {
-    if (onTrendlineUpdate) onTrendlineUpdate(tl);
-    else setInternalTrendlines(prev => prev.map(t => t.id === tl.id ? tl : t));
-  };
-  const removeTl = (id: number) => {
-    setSelectedTlId(null);
-    if (onTrendlineRemove) onTrendlineRemove(id);
-    else setInternalTrendlines(prev => prev.filter(t => t.id !== id));
-  };
+  const subscribersRef = useRef<Set<() => void>>(new Set());
 
   const cgId = cgIdFromSymbol(symbol);
   const canChart = !!cgId;
 
-  const barsRef = useRef<Bar[]>([]);
-  const viewRef = useRef({ start: 0, end: 0 });
-  const crossXRef = useRef<number | null>(null);
-  const pinchRef = useRef({ active: false, dist: 0, startView: [0, 0] as [number, number] });
-  const panRef = useRef({ active: false, startX: 0, startView: [0, 0] as [number, number] });
-  const measureRef = useRef<{ x1: number; x2: number } | null>(null);
-  const longPressRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> | null }>({ x: 0, y: 0, timer: null });
-  const measureActiveRef = useRef(false);
+  // Expose imperative API via onApi callback
+  useEffect(() => {
+    if (!onApi) return;
+    const api: ChartAPI = {
+      setDays: (d: number) => { setDays(d); managerRef.current?.setDays(d); },
+      getDays: () => days,
+      setIndicator: (t) => { setIndicator(t === indicator ? "none" as IndicatorType : t); },
+      getIndicator: () => indicator,
+      toggleVP: () => setShowVP(v => !v),
+      getVP: () => showVP,
+      toggleTape: () => setShowTape(v => !v),
+      getTape: () => showTape,
+      toggleLog: () => setLogScale(l => { managerRef.current?.setLogScale(!l); return !l; }),
+      getLog: () => logScale,
+      toggleMagnet: () => setMagnet(m => !m),
+      getMagnet: () => magnet,
+      toggleHA: () => setCandleType(c => c === "candle" ? "heikin" : "candle"),
+      getHA: () => candleType === "heikin",
+      toggleFib: () => setDrawTool(dt => dt === "line" ? "fib" : "line"),
+      getDrawTool: () => drawTool,
+      createLine: () => managerRef.current?.createTrendline(),
+      removeSelected: () => managerRef.current?.removeSelectedTrendline(),
+      getHasSelection: () => selectedTlId != null,
+      subscribe: (cb: () => void) => {
+        subscribersRef.current.add(cb);
+        return () => { subscribersRef.current.delete(cb); };
+      },
+    };
+    onApi(api);
+  }, [onApi, days, indicator, showVP, showTape, logScale, magnet, candleType, drawTool, selectedTlId]);
 
-  // Drag state for trendlines: which tl, which endpoint ("start"/"end"/"move")
-  const dragRef = useRef<{ tlId: number; mode: "start" | "end" | "move"; startTs: number; startPrice: number; origTl: TrendLine } | null>(null);
-  // Overlay ref: when set, render uses this instead of activeTrendlines (avoids stale-canvas during drag)
-  const dragTrendlinesRef = useRef<TrendLine[] | null>(null);
+  // Create/destroy ChartManager
+  useEffect(() => {
+    if (!canChart || !mainChartRef.current) return;
+    const manager = new ChartManager(mainChartRef.current, {
+      symbol,
+      height,
+      onStatusChange: (s) => {
+        setLoading(s.loading);
+        setError(s.error);
+        setEmpty(s.empty);
+      },
+      onTrendlineAdd,
+      onTrendlineUpdate,
+      onTrendlineRemove,
+    });
+    manager.onTrendlineSelect = setSelectedTlId;
 
-  // Helper: pixel coords to bar index + price
-  const pixelToData = useCallback((px: number, py: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !barsRef.current.length) return null;
-    const rect = canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-    const s = buildDrawState(
-      { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
-      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-      priceZoomRef.current, logScale
-    );
-    const idx = Math.round(s.xToIdx(px));
-    const price = s.yToPrice(py);
-    const ts = parseTime(barsRef.current[Math.max(0, Math.min(idx, barsRef.current.length - 1))].time) || Date.now();
-    return { idx, price, ts };
-  }, [days, logScale]);
+    // Defer init outside React's commit phase
+    manager.scheduleInit();
 
-  // Magnet snap: round price to nearest OHLC of the bar under cursor
-  const snapToOHLC = useCallback((data: { idx: number; price: number; ts: number }): { idx: number; price: number; ts: number } => {
-    const bars = barsRef.current;
-    if (!bars.length) return data;
-    const idx = Math.max(0, Math.min(bars.length - 1, data.idx));
-    const bar = bars[idx];
-    const candidates = [bar.open, bar.high, bar.low, bar.close];
-    let best = candidates[0];
-    let bestDist = Math.abs(data.price - best);
-    for (const c of candidates) {
-      const d = Math.abs(data.price - c);
-      if (d < bestDist) { bestDist = d; best = c; }
+    managerRef.current = manager;
+
+    return () => {
+      manager.destroy();
+      managerRef.current = null;
+    };
+  }, [canChart, symbol]);
+
+  // Update indicator dom ref when indicator changes
+  useEffect(() => {
+    const manager = managerRef.current;
+    if (!manager) return;
+    setTimeout(() => {
+      if (indicator === "none") {
+        manager.setIndicator("none");
+      } else if (indChartRef.current) {
+        manager.setIndicatorDom(indChartRef.current);
+        manager.setIndicator(indicator);
+      }
+    }, 0);
+  }, [indicator]);
+
+  // Sync external props to manager
+  useEffect(() => {
+    managerRef.current?.setHeight(height);
+  }, [height]);
+
+  useEffect(() => {
+    managerRef.current?.setPriceLevels(priceLevels);
+  }, [priceLevels]);
+
+  useEffect(() => {
+    managerRef.current?.setTrendlines(trendlines);
+  }, [trendlines]);
+
+  useEffect(() => {
+    managerRef.current?.setSelectedTrendlineId(selectedTlId);
+  }, [selectedTlId]);
+
+  useEffect(() => {
+    managerRef.current?.setLogScale(logScale);
+  }, [logScale]);
+
+  useEffect(() => {
+    managerRef.current?.setHeikinAshi(candleType === "heikin");
+  }, [candleType]);
+
+  useEffect(() => {
+    managerRef.current?.setMagnet(magnet);
+  }, [magnet]);
+
+  useEffect(() => {
+    managerRef.current?.setDrawTool(drawTool);
+  }, [drawTool]);
+
+  useEffect(() => {
+    managerRef.current?.setShowVP(showVP);
+    if (showVP) {
+      managerRef.current?.startVPRefresh();
+    } else {
+      managerRef.current?.stopVPRefresh();
     }
-    return { idx, price: best, ts: data.ts };
+  }, [showVP]);
+
+  // Days change (timeframe selector)
+  useEffect(() => {
+    const manager = managerRef.current;
+    if (!manager) return;
+    setDays(d => {
+      // Use a ref approach — but manager handles it
+      return d;
+    });
   }, []);
 
-  // Helper: find trendline + hit-test which part
-  const hitTestTrendline = useCallback((px: number, py: number): { tl: TrendLine; mode: "start" | "end" | "move" } | null => {
-    const canvas = canvasRef.current;
-    if (!canvas || !barsRef.current.length) return null;
-    const rect = canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-    const s = buildDrawState(
-      { scale: () => {} } as unknown as CanvasRenderingContext2D, w, h,
-      barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-      priceZoomRef.current, logScale
-    );
+  const handleDaysChange = useCallback((newDays: number) => {
+    setDays(newDays);
+    managerRef.current?.setDays(newDays);
+  }, []);
 
-    const timeToIdx = (ts: number): number => {
-      const bars = barsRef.current;
-      let best = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < bars.length; i++) {
-        const bt = parseTime(bars[i].time);
-        const d = Math.abs(bt - ts);
-        if (d < bestDist) { bestDist = d; best = i; }
-        if (bt > ts) break;
-      }
-      return best;
-    };
+  const handleIndicatorChange = useCallback((type: IndicatorType) => {
+    setIndicator(prev => prev === type ? "none" : type);
+  }, []);
 
-    let best: { tl: TrendLine; mode: "start" | "end" | "move"; dist: number } | null = null;
-
-    for (const tl of activeTrendlines) {
-      const x1 = s.idxToX(timeToIdx(tl.startTime));
-      const y1 = s.priceToY(tl.startPrice);
-      const x2 = s.idxToX(timeToIdx(tl.endTime));
-      const y2 = s.priceToY(tl.endPrice);
-
-      // Endpoints: 26px radius (fat finger friendly)
-      for (const [mode, ex, ey] of [["start", x1, y1], ["end", x2, y2]] as const) {
-        const d = Math.sqrt((px - ex) ** 2 + (py - ey) ** 2);
-        if (d < 26 && (!best || d < best.dist)) {
-          best = { tl, mode, dist: d };
-        }
-      }
-
-      // Line body: point-to-line distance, 18px threshold
-      const lenSq = (x2 - x1) ** 2 + (y2 - y1) ** 2;
-      if (lenSq > 0) {
-        const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / lenSq));
-        const projX = x1 + t * (x2 - x1);
-        const projY = y1 + t * (y2 - y1);
-        const d = Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
-        if (d < 18 && (!best || d < best.dist)) {
-          best = { tl, mode: "move", dist: d };
-        }
-      }
-    }
-
-    return best ? { tl: best.tl, mode: best.mode } : null;
-  }, [activeTrendlines, days, logScale]);
-
-  // Create a new trendline button handler
   const handleCreateTrendline = useCallback(() => {
-    const bars = barsRef.current;
-    if (!bars.length) return;
-    const ve = viewRef.current.end || bars.length;
-    const vs = viewRef.current.start;
-    const mid = Math.floor((vs + ve) / 2);
-    const span = Math.max(3, Math.floor((ve - vs) / 6));
-    const { st_lo, st_hi } = (() => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        const c = bars[Math.min(mid, bars.length - 1)].close;
-        return { st_lo: c * 0.96, st_hi: c * 1.04 };
-      }
-      const rect = canvas.getBoundingClientRect();
-      const st = buildDrawState(
-        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-        bars, days <= 1, vs, ve, priceZoomRef.current, logScale
-      );
-      // Fib spans full visible chart height
-      return { st_lo: st.lo, st_hi: st.hi };
-    })();
+    managerRef.current?.createTrendline();
+  }, []);
 
-    const newTl: TrendLine = {
-      id: nextIdRef.current++,
-      startTime: parseTime(bars[Math.max(0, mid - span)].time),
-      startPrice: st_hi,
-      endTime: parseTime(bars[Math.min(bars.length - 1, mid + span)].time),
-      endPrice: st_lo,
-      color: TL_COLORS[(onTrendlineAdd ? trendlines.length : internalTrendlines.length) % TL_COLORS.length],
-      kind: drawTool,
-    };
-    if (onTrendlineAdd) {
-      onTrendlineAdd(newTl);
-    } else {
-      setInternalTrendlines(prev => [...prev, newTl]);
-    }
-    setSelectedTlId(newTl.id);
-  }, [days, onTrendlineAdd, trendlines, internalTrendlines, drawTool, logScale]);
+  const handleRemoveTrendline = useCallback(() => {
+    managerRef.current?.removeSelectedTrendline();
+  }, []);
 
+<<<<<<< HEAD
   const render = useCallback((bars: Bar[], subDaily: boolean, crossX?: number | null) => {
     if (!bars.length) {
       setEmpty(true);
@@ -1832,6 +2500,9 @@ export function CandleChart({
   }, [showVP, symbol, days, canChart, render]);
 
   // Tape fetch (crypto only) — poll every 2s
+=======
+  // Tape fetch
+>>>>>>> d246df0 (fix: bypass broken ECharts 6 graphic component - draw directly on zrender canvas)
   useEffect(() => {
     if (!showTape || !symbol.startsWith("BINANCE:")) {
       setTrades([]);
@@ -1841,7 +2512,7 @@ export function CandleChart({
     const loadTape = () => {
       fetchTrades(symbol, 50).then((data) => {
         if (cancelled) return;
-        setTrades(data.reverse()); // newest first
+        setTrades(data.reverse());
       });
     };
     loadTape();
@@ -1849,7 +2520,7 @@ export function CandleChart({
     return () => { cancelled = true; clearInterval(interval); };
   }, [showTape, symbol]);
 
-  // Chart resize via drag handle
+  // Resize handle
   const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
   const handleResizeStart = useCallback((e: React.PointerEvent) => {
     e.stopPropagation();
@@ -1867,395 +2538,7 @@ export function CandleChart({
     resizeRef.current = null;
   }, []);
 
-  // Pointer handlers: move/resize trendlines, crosshair, select
-  const handlePointerMove = useCallback((e: React.PointerEvent | React.MouseEvent) => {
-    if (!barsRef.current.length) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e as React.PointerEvent).clientX - rect.left;
-    const y = (e as React.PointerEvent).clientY - rect.top;
-    const bars = barsRef.current;
-
-    // Price axis zoom drag (desktop)
-    if (priceZoomAnchorRef.current && !dragRef.current && !panRef.current.active) {
-      const pe = e as React.PointerEvent;
-      const dy = pe.clientY - priceZoomAnchorRef.current.y;
-      const anchor = priceZoomAnchorRef.current;
-      const origRange = anchor.hi - anchor.lo;
-      const zoomFactor = Math.exp(-dy * 0.005);
-      const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
-      const mid = (anchor.lo + anchor.hi) / 2;
-      priceZoomRef.current = { lo: mid - newRange / 2, hi: mid + newRange / 2 };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    // Measure drag (Shift+drag desktop)
-    if (measureActiveRef.current && (e as React.PointerEvent).buttons === 1) {
-      measureRef.current = { x1: measureRef.current!.x1, x2: x };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    // Panning (desktop)
-    if (panRef.current.active && (e as React.PointerEvent).buttons === 1) {
-      const dx = (e as React.PointerEvent).clientX - panRef.current.startX;
-      const chartW = rect.width - 60;
-      const barW = chartW / (panRef.current.startView[1] - panRef.current.startView[0]);
-      const shift = Math.round(-dx / barW);
-      const range = panRef.current.startView[1] - panRef.current.startView[0];
-      let newStart = panRef.current.startView[0] + shift;
-      newStart = Math.max(0, Math.min(bars.length - range, newStart));
-      viewRef.current = { start: newStart, end: newStart + range };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    // Dragging a trendline
-    if (dragRef.current && (e as React.PointerEvent).buttons === 1) {
-      const data = pixelToData(x, y);
-      if (!data) return;
-      const snapData = magnet ? snapToOHLC(data) : data;
-      const drag = dragRef.current;
-      const orig = drag.origTl;
-      const dt = snapData.ts - drag.startTs;
-      const dy = snapData.price - drag.startPrice;
-
-      const updated: TrendLine = { ...orig };
-      if (drag.mode === "start") {
-        updated.startTime = orig.startTime + dt;
-        updated.startPrice = orig.startPrice + dy;
-      } else if (drag.mode === "end") {
-        updated.endTime = orig.endTime + dt;
-        updated.endPrice = orig.endPrice + dy;
-      } else {
-        updated.startTime = orig.startTime + dt;
-        updated.endTime = orig.endTime + dt;
-        updated.startPrice = orig.startPrice + dy;
-        updated.endPrice = orig.endPrice + dy;
-      }
-      updateTl(updated);
-      dragTrendlinesRef.current = activeTrendlines.map(t => t.id === updated.id ? updated : t);
-      render(barsRef.current, days <= 1);
-      return;
-    }
-
-    crossXRef.current = x;
-    render(barsRef.current, days <= 1, x);
-  }, [days, render, pixelToData, updateTl, activeTrendlines, magnet, snapToOHLC]);
-
-  const handlePointerLeave = useCallback(() => {
-    crossXRef.current = null;
-    if (barsRef.current.length) render(barsRef.current, days <= 1, null);
-  }, [days, render]);
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const data = pixelToData(x, y);
-
-    // Shift+click+drag → measure tool (desktop)
-    if (e.shiftKey) {
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      measureRef.current = { x1: x, x2: x };
-      measureActiveRef.current = true;
-      setSelectedTlId(null);
-      if (barsRef.current.length) render(barsRef.current, days <= 1, null);
-      return;
-    }
-
-    // Hit-test trendlines
-    if (data) {
-      const hit = hitTestTrendline(x, y);
-      if (hit) {
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
-        setSelectedTlId(hit.tl.id);
-        dragRef.current = {
-          tlId: hit.tl.id,
-          mode: hit.mode,
-          startTs: data.ts,
-          startPrice: data.price,
-          origTl: { ...hit.tl },
-        };
-        return;
-      }
-    }
-
-    // Price axis zone: start price zoom drag (desktop)
-    if (x > rect.width - 56) {
-      const s = buildDrawState(
-        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-        barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-        priceZoomRef.current, logScale
-      );
-      priceZoomAnchorRef.current = {
-        y: e.clientY,
-        lo: s.lo,
-        hi: s.hi,
-      };
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      return;
-    }
-
-    // Empty space — start pan (desktop)
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    setSelectedTlId(null);
-    dragRef.current = null;
-    panRef.current = {
-      active: true,
-      startX: e.clientX,
-      startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
-    };
-  }, [pixelToData, hitTestTrendline, days, logScale]);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    panRef.current = { active: false, startX: 0, startView: [0, 0] };
-    priceZoomAnchorRef.current = null;
-    dragRef.current = null;
-    dragTrendlinesRef.current = null;
-    if (measureActiveRef.current) {
-      measureActiveRef.current = false;
-      measureRef.current = null;
-      if (barsRef.current.length) renderRef.current(barsRef.current, false);
-    }
-  }, []);
-
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    // Second finger → cancel any pending long-press (it's a pinch)
-    if (longPressRef.current.timer) {
-      clearTimeout(longPressRef.current.timer);
-      longPressRef.current.timer = null;
-    }
-
-    if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      pinchRef.current = {
-        active: true,
-        dist: Math.sqrt(dx * dx + dy * dy),
-        startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
-      };
-    } else if (e.touches.length === 1 && !pinchRef.current.active) {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.touches[0].clientX - rect.left;
-        const y = e.touches[0].clientY - rect.top;
-        const hit = hitTestTrendline(x, y);
-        if (hit) {
-          setSelectedTlId(hit.tl.id);
-          dragRef.current = {
-            tlId: hit.tl.id,
-            mode: hit.mode,
-            startTs: pixelToData(x, y)?.ts ?? Date.now(),
-            startPrice: pixelToData(x, y)?.price ?? 0,
-            origTl: { ...hit.tl },
-          };
-          return; // Don't start pan — this is a trendline drag
-        }
-
-        // Price axis zone: start price zoom drag
-        if (x > rect.width - 56) {
-          const s = buildDrawState(
-            { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-            barsRef.current, days <= 1, viewRef.current.start, viewRef.current.end || barsRef.current.length,
-            priceZoomRef.current, logScale
-          );
-          priceZoomAnchorRef.current = {
-            y: e.touches[0].clientY,
-            lo: s.lo,
-            hi: s.hi,
-          };
-          return; // Don't start pan
-        }
-      }
-
-      panRef.current = {
-        active: true,
-        startX: e.touches[0].clientX,
-        startView: [viewRef.current.start, viewRef.current.end || barsRef.current.length],
-      };
-
-      // Long-press → enter measure mode (both points start at finger position)
-      const cx = e.touches[0].clientX;
-      const cy = e.touches[0].clientY;
-      longPressRef.current = { x: cx, y: cy, timer: setTimeout(() => {
-        if (panRef.current.active && canvasRef.current) {
-          const r = canvasRef.current.getBoundingClientRect();
-          const fx = cx - r.left;
-          measureRef.current = { x1: fx, x2: fx };
-          measureActiveRef.current = true;
-          panRef.current.active = false; // steal from pan
-          if (barsRef.current.length) renderRef.current(barsRef.current, days <= 1, null);
-        }
-      }, 300) };
-    }
-  }, [hitTestTrendline, pixelToData, days, logScale]);
-
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    const bars = barsRef.current;
-    if (!bars.length) return;
-
-    // Price axis zoom drag
-    if (priceZoomAnchorRef.current && e.touches.length === 1) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const dy = e.touches[0].clientY - priceZoomAnchorRef.current.y;
-      const anchor = priceZoomAnchorRef.current;
-      const origRange = anchor.hi - anchor.lo;
-      const zoomFactor = Math.exp(-dy * 0.005); // drag up = zoom in
-      const newRange = Math.max(origRange * 0.02, Math.min(origRange * 50, origRange * zoomFactor));
-      // Anchor at center of original range
-      const mid = (anchor.lo + anchor.hi) / 2;
-      priceZoomRef.current = { lo: mid - newRange / 2, hi: mid + newRange / 2 };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    // Trendline drag (takes priority over pan)
-    if (dragRef.current && e.touches.length === 1) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.touches[0].clientX - rect.left;
-      const y = e.touches[0].clientY - rect.top;
-      const data = pixelToData(x, y);
-      if (!data) return;
-      const snapData = magnet ? snapToOHLC(data) : data;
-      const drag = dragRef.current;
-      const orig = drag.origTl;
-      const dt = snapData.ts - drag.startTs;
-      const dy = snapData.price - drag.startPrice;
-
-      const updated: TrendLine = { ...orig };
-      if (drag.mode === "start") {
-        updated.startTime = orig.startTime + dt;
-        updated.startPrice = orig.startPrice + dy;
-      } else if (drag.mode === "end") {
-        updated.endTime = orig.endTime + dt;
-        updated.endPrice = orig.endPrice + dy;
-      } else {
-        updated.startTime = orig.startTime + dt;
-        updated.endTime = orig.endTime + dt;
-        updated.startPrice = orig.startPrice + dy;
-        updated.endPrice = orig.endPrice + dy;
-      }
-      updateTl(updated);
-      dragTrendlinesRef.current = activeTrendlines.map(t => t.id === updated.id ? updated : t);
-      render(bars, days <= 1);
-      return;
-    }
-
-    if (measureActiveRef.current && e.touches.length === 1) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      measureRef.current = { x1: measureRef.current!.x1, x2: e.touches[0].clientX - rect.left };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    if (pinchRef.current.active && e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const scale = pinchRef.current.dist / dist;
-      const [sStart, sEnd] = pinchRef.current.startView;
-      const range = sEnd - sStart;
-      const center = sStart + range / 2;
-      const newRange = Math.max(5, Math.min(bars.length, Math.round(range * scale)));
-      const newStart = Math.max(0, Math.min(bars.length - newRange, Math.round(center - newRange / 2)));
-      viewRef.current = { start: newStart, end: newStart + newRange };
-      render(bars, days <= 1, null);
-    } else if (panRef.current.active && e.touches.length === 1) {
-      // Cancel long-press if this turned into a real pan (>10px moved)
-      if (longPressRef.current.timer) {
-        const moved = Math.abs(e.touches[0].clientX - longPressRef.current.x) + Math.abs(e.touches[0].clientY - longPressRef.current.y);
-        if (moved > 10) {
-          clearTimeout(longPressRef.current.timer);
-          longPressRef.current.timer = null;
-        }
-      }
-      const dx = e.touches[0].clientX - panRef.current.startX;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const chartW = canvas.getBoundingClientRect().width - 60;
-      const barW = chartW / (panRef.current.startView[1] - panRef.current.startView[0]);
-      const shift = Math.round(-dx / barW);
-      const range = panRef.current.startView[1] - panRef.current.startView[0];
-      let newStart = panRef.current.startView[0] + shift;
-      newStart = Math.max(0, Math.min(bars.length - range, newStart));
-      viewRef.current = { start: newStart, end: newStart + range };
-      render(bars, days <= 1, null);
-    }
-  }, [days, render, pixelToData, updateTl, magnet, snapToOHLC]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressRef.current.timer) {
-      clearTimeout(longPressRef.current.timer);
-      longPressRef.current.timer = null;
-    }
-    pinchRef.current = { active: false, dist: 0, startView: [0, 0] };
-    panRef.current = { active: false, startX: 0, startView: [0, 0] };
-    dragRef.current = null;
-    priceZoomAnchorRef.current = null;
-    if (measureActiveRef.current) {
-      measureActiveRef.current = false;
-      measureRef.current = null;
-      if (barsRef.current.length) renderRef.current(barsRef.current, false);
-    }
-  }, []);
-
-  // Mouse wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    const bars = barsRef.current;
-    if (!bars.length) return;
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-
-    // Price axis zone: right padRight (56px)
-    if (mx > rect.width - 56) {
-      const s = buildDrawState(
-        { scale: () => {} } as unknown as CanvasRenderingContext2D, rect.width, rect.height,
-        bars, days <= 1, viewRef.current.start, viewRef.current.end || bars.length,
-        priceZoomRef.current, logScale
-      );
-      const priceAtY = s.yToPrice(e.clientY - rect.top);
-      const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-      const curRange = s.hi - s.lo;
-      const newRange = Math.max(curRange * 0.02, Math.min(curRange * 50, curRange * zoomFactor));
-      const ratio = (priceAtY - s.lo) / (s.hi - s.lo);
-      const newLo = priceAtY - newRange * ratio;
-      const newHi = priceAtY + newRange * (1 - ratio);
-      priceZoomRef.current = { lo: newLo, hi: newHi };
-      render(bars, days <= 1, null);
-      return;
-    }
-
-    // Time axis zoom
-    const [curStart, curEnd] = [viewRef.current.start, viewRef.current.end || bars.length];
-    const range = curEnd - curStart;
-    const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-    const newRange = Math.max(5, Math.min(bars.length, Math.round(range * zoomFactor)));
-
-    const mxNorm = mx / rect.width;
-    const center = curStart + range * mxNorm;
-    let newStart = Math.round(center - newRange * mxNorm);
-    newStart = Math.max(0, Math.min(bars.length - newRange, newStart));
-
-    viewRef.current = { start: newStart, end: newStart + newRange };
-    render(bars, days <= 1, null);
-  }, [days, render, logScale]);
-
+  // Toolbar button style
   const toolBtn = (active: boolean, bg: string, fg: string): React.CSSProperties => ({
     padding: "3px 8px", borderRadius: "5px", border: "none",
     background: active ? bg : "transparent",
@@ -2267,6 +2550,60 @@ export function CandleChart({
 
   if (!canChart) return null;
 
+  // ─── Chromeless path: only chart canvas + indicator div ───
+  if (chromeless) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%" }}>
+        {/* Main chart */}
+        <div style={{
+          flex: 1,
+          overflow: "hidden",
+          background: "rgba(255,255,255,0.02)",
+          position: "relative",
+          touchAction: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+        }}>
+          <div ref={mainChartRef} style={{ width: "100%", height: "100%" }} />
+          {loading && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
+            }}>Loading chart...</div>
+          )}
+          {error && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
+            }}>Chart unavailable</div>
+          )}
+          {empty && !loading && (
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
+            }}>No chart data</div>
+          )}
+        </div>
+
+        {/* Indicator panel */}
+        {indicator !== "none" && (
+          <div style={{
+            overflow: "hidden",
+            background: "rgba(255,255,255,0.02)",
+            height: 80,
+            borderTop: "1px solid rgba(255,255,255,0.04)",
+          }}>
+            <div ref={indChartRef} style={{ width: "100%", height: "100%" }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Normal path (with toolbar chrome) ───
   return (
     <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", height: height ? undefined : "100%", position: height ? undefined : "absolute", inset: height ? undefined : 0 }}>
       {/* Row 1: timeframes + indicators */}
@@ -2276,18 +2613,13 @@ export function CandleChart({
         {TF.map((t) => (
           <button
             key={t.days}
-            onClick={() => setDays(t.days)}
+            onClick={() => handleDaysChange(t.days)}
             style={{
-              padding: "3px 8px",
-              borderRadius: "5px",
-              border: "none",
+              padding: "3px 8px", borderRadius: "5px", border: "none",
               background: days === t.days ? "var(--lime-dim)" : "transparent",
               color: days === t.days ? "var(--lime)" : "var(--text-dim)",
-              fontSize: "11px",
-              fontWeight: 500,
-              cursor: "pointer",
-              flexShrink: 0,
-              whiteSpace: "nowrap",
+              fontSize: "11px", fontWeight: 500, cursor: "pointer",
+              flexShrink: 0, whiteSpace: "nowrap",
             }}
           >
             {t.label}
@@ -2295,15 +2627,15 @@ export function CandleChart({
         ))}
         <div style={{ marginLeft: "auto", display: "flex", gap: "3px", alignItems: "center", flexShrink: 0 }}>
           <button
-            onClick={() => setIndicator(indicator === "macd" ? "none" : "macd")}
+            onClick={() => handleIndicatorChange("macd")}
             style={toolBtn(indicator === "macd", "rgba(56,189,248,0.12)", "rgba(56,189,248,0.8)")}
           >MACD</button>
           <button
-            onClick={() => setIndicator(indicator === "rsi" ? "none" : "rsi")}
+            onClick={() => handleIndicatorChange("rsi")}
             style={toolBtn(indicator === "rsi", "rgba(168,85,247,0.12)", "rgba(168,85,247,0.8)")}
           >RSI</button>
           <button
-            onClick={() => setIndicator(indicator === "zscore" ? "none" : "zscore")}
+            onClick={() => handleIndicatorChange("zscore")}
             style={toolBtn(indicator === "zscore", "rgba(251,191,36,0.12)", "rgba(251,191,36,0.8)")}
           >Z</button>
           {symbol.startsWith("BINANCE:") && (
@@ -2325,7 +2657,7 @@ export function CandleChart({
         onPointerDown={e => e.stopPropagation()}
       >
         <button
-          onClick={() => setDrawTool(drawTool === "line" ? "fib" : "line")}
+          onClick={() => setDrawTool(dt => dt === "line" ? "fib" : "line")}
           style={toolBtn(drawTool === "fib", "rgba(168,85,247,0.12)", "rgba(168,85,247,0.8)")}
         >FIB</button>
         <button
@@ -2339,7 +2671,7 @@ export function CandleChart({
           }}
         >+ {drawTool === "fib" ? "Fib" : "Line"}</button>
         <button
-          onClick={() => removeTl(selectedTlId!)}
+          onClick={handleRemoveTrendline}
           style={{
             padding: "3px 8px", borderRadius: "5px", border: "none",
             background: "transparent", color: "var(--text-dim)",
@@ -2355,7 +2687,7 @@ export function CandleChart({
           style={toolBtn(magnet, "rgba(163,230,53,0.12)", "rgba(163,230,53,0.8)")}
         >MAG</button>
         <button
-          onClick={() => setLogScale(l => !l)}
+          onClick={() => setLogScale(l => { managerRef.current?.setLogScale(!l); return !l; })}
           style={toolBtn(logScale, "rgba(56,189,248,0.12)", "rgba(56,189,248,0.8)")}
         >LOG</button>
         <button
@@ -2368,6 +2700,8 @@ export function CandleChart({
           style={toolBtn(showSignals, "rgba(34,197,94,0.15)", "rgba(34,197,94,0.9)")}
         >BtSr</button>
       </div>
+
+      {/* Main chart */}
       <div
         style={{
           borderRadius: "12px",
@@ -2382,42 +2716,30 @@ export function CandleChart({
           WebkitUserSelect: "none",
         }}
       >
-        <canvas
-          ref={canvasRef}
-          draggable={false}
-          onDragStart={e => e.preventDefault()}
-          style={{ display: "block", width: "100%", height: "100%" }}
-          onPointerMove={handlePointerMove}
-          onPointerLeave={handlePointerLeave}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onWheel={handleWheel}
-        />
+        <div ref={mainChartRef} style={{ width: "100%", height: "100%" }} />
         {loading && (
           <div style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "var(--text-dim)", fontSize: "13px", zIndex: 1,
+            color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
           }}>Loading chart...</div>
         )}
         {error && (
           <div style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "var(--text-dim)", fontSize: "13px", zIndex: 1,
+            color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
           }}>Chart unavailable</div>
         )}
         {empty && !loading && (
           <div style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "var(--text-dim)", fontSize: "13px", zIndex: 1,
+            color: "var(--text-dim)", fontSize: "13px", zIndex: 1, pointerEvents: "none",
           }}>No chart data</div>
         )}
       </div>
+
       {/* Indicator panel */}
       {indicator !== "none" && (
         <div style={{
@@ -2427,14 +2749,11 @@ export function CandleChart({
           height: 80,
           borderTop: "1px solid rgba(255,255,255,0.04)",
         }}>
-          <canvas
-            ref={indicatorCanvasRef}
-            draggable={false}
-            onDragStart={e => e.preventDefault()}
-            style={{ display: "block", width: "100%", height: "100%" }}
-          />
+          <div ref={indChartRef} style={{ width: "100%", height: "100%" }} />
         </div>
       )}
+
+      {/* Resize handle */}
       {resizable && (
         <div
           onPointerDown={handleResizeStart}
@@ -2454,7 +2773,8 @@ export function CandleChart({
           <div style={{ width: 32, height: 3, borderRadius: 2, background: "var(--text-dim)", opacity: 0.3 }} />
         </div>
       )}
-      {/* Tape — trade feed below chart */}
+
+      {/* Tape — trade feed */}
       {showTape && symbol.startsWith("BINANCE:") && trades.length > 0 && (() => {
         const fmtP = fmtPrice;
         const fmtQ = (n: number) => {
@@ -2478,7 +2798,6 @@ export function CandleChart({
             background: "rgba(255,255,255,0.02)",
             fontFamily: "ui-monospace, SFMono-Regular, monospace",
           }}>
-            {/* Header */}
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
               padding: "6px 12px",
@@ -2490,13 +2809,11 @@ export function CandleChart({
                 <span style={{ fontSize: "9px", color: "rgba(248,113,113,0.6)" }}>{sells} sells</span>
               </div>
             </div>
-            {/* Column labels */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "3px 12px", fontSize: "9px", color: "rgba(255,255,255,0.3)", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
               <span>Time</span>
               <span style={{ textAlign: "right" }}>Price</span>
               <span style={{ textAlign: "right" }}>Size</span>
             </div>
-            {/* Trade rows */}
             <div style={{ maxHeight: "300px", overflowY: "auto" }}>
               {trades.map((t, i) => (
                 <div key={i} style={{
