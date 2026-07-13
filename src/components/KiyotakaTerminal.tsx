@@ -565,10 +565,10 @@ const KIYOTAKA_CSS = `
 
   /* Drawing Toolbar */
   .kt-draw-toolbar {
-    position: absolute; top: 10px; left: 60px; z-index: 100;
-    display: flex; gap: 2px; padding: 4px;
+    position: absolute; top: 50%; left: 8px; z-index: 100; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 2px; padding: 6px;
     background: rgba(15,15,17,.92);
-    border: 1px solid #1e1e22;
+    border: 1px solid rgba(255,255,255,.06);
     border-radius: 8px;
     backdrop-filter: blur(8px);
   }
@@ -582,14 +582,14 @@ const KIYOTAKA_CSS = `
   .kt-draw-btn:hover { background: rgba(255,255,255,.06); color: #ccc; }
   .kt-draw-btn.active { background: rgba(0,236,151,.15); color: #00EC97; }
   .kt-draw-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .kt-draw-sep { width: 1px; background: #1e1e22; margin: 4px 2px; }
+  .kt-draw-sep { height: 1px; background: #1e1e22; margin: 2px 4px; }
 
   /* Mobile */
   @media (max-width: 640px) {
     .kt-header { padding: 10px 14px; gap: 10px; }
-    .kt-draw-toolbar { left: 6px; padding: 3px; gap: 1px; }
-    .kt-draw-btn { width: 42px; height: 42px; }
-    .kt-draw-btn svg { width: 22px; height: 22px; }
+    .kt-draw-toolbar { left: 6px; padding: 4px; gap: 1px; }
+    .kt-draw-btn { width: 36px; height: 36px; }
+    .kt-draw-btn svg { width: 16px; height: 16px; }
     .kt-symbol { font-size: 15px; }
     .kt-price { font-size: 18px; }
     .kt-stats { display: none; }
@@ -598,7 +598,6 @@ const KIYOTAKA_CSS = `
     .kt-sb-wrapper.open { width: 100% !important; }
     .kt-sidebar { width: 300px; max-width: 85vw; }
     .kt-sb-backdrop.show { display: block; }
-    .kt-draw-toolbar { left: 10px; }
   }
 `;
 
