@@ -1626,13 +1626,6 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
             drawingsRef.current = [];
             syncGraphics();
 
-            // Reset zoom to show all new bars
-            const newTotal = data.dates.length - 1;
-            zoomRef.current.start = 0;
-            zoomRef.current.end = 100;
-            zoomRef.current.startVal = 0;
-            zoomRef.current.endVal = newTotal;
-            chart.setOption({ dataZoom: [{ id: "__kt_inside", start: 0, end: 100 }] });
           } catch (_e) { /* noop */ }
           tfFetchRef.current = null;
         })();
@@ -1646,24 +1639,22 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
       const goLive = async () => {
         const chart = chartRef.current;
         if (!chart || !mountedRef.current) return;
-        // Switch to 1m if not already
+        // Switch to 1m if not already (wait for fetch + rebuild)
         if (currentTfRef.current !== "1m") {
           await swapToTf("1m");
         }
-        // Zoom to last 60 candles (1hr)
-        setTimeout(() => {
-          const d = dataRef.current;
-          if (!d || !chart) return;
-          const total = d.dates.length - 1;
-          const showBars = 60;
-          const endPct = 100;
-          const startPct = Math.max(0, 100 - (showBars / total) * 100);
-          chart.setOption({ dataZoom: [{ id: "__kt_inside", start: startPct, end: endPct }] });
-          zoomRef.current.start = startPct;
-          zoomRef.current.end = endPct;
-          zoomRef.current.startVal = Math.max(0, total - showBars);
-          zoomRef.current.endVal = total;
-        }, 100);
+        // Now zoom to last 60 candles (1hr)
+        const d = dataRef.current;
+        if (!d || !chart) return;
+        const total = d.dates.length - 1;
+        const showBars = 60;
+        const endPct = 100;
+        const startPct = Math.max(0, 100 - (showBars / total) * 100);
+        chart.setOption({ dataZoom: [{ id: "__kt_inside", start: startPct, end: endPct }] });
+        zoomRef.current.start = startPct;
+        zoomRef.current.end = endPct;
+        zoomRef.current.startVal = Math.max(0, total - showBars);
+        zoomRef.current.endVal = total;
       };
       goLiveRef.current = goLive;
 
