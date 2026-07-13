@@ -3,7 +3,7 @@ import { ChevronLeft, Trash2, Pencil, Plus, LayoutGrid, Monitor, X, PanelRightCl
 import type { Transaction, Quote, Position } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
-import { CandleChart, type ChartAPI, type PriceLevel } from "./CandleChart";
+import { CandleChart, type PriceLevel } from "./CandleChart";
 import KiyotakaTerminal from "./KiyotakaTerminal";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";
@@ -54,15 +54,8 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const [chartH, setChartH] = useState(286);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Chart API ref for terminal toolbar
-  const chartApiRef = useRef<ChartAPI | null>(null);
-  const [chartTick, setChartTick] = useState(0); // force re-render when chart state changes
-
-  const handleChartApi = useCallback((api: ChartAPI) => {
-    chartApiRef.current = api;
-    // Subscribe to state changes to keep toolbar buttons in sync
-    api.subscribe(() => setChartTick(t => t + 1));
-  }, []);
+  // Chart tick for terminal toolbar sync
+  const [chartTick, setChartTick] = useState(0);
 
   const lots = txs.filter((t) => t.symbol === symbol).sort((a, b) => a.ts - b.ts);
   const label = labelFromSymbol(symbol);
