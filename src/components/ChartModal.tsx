@@ -4,10 +4,11 @@ import { labelFromSymbol } from "@/lib/constants";
 
 interface Props {
   symbol: string | null;
+  entryPrice?: number;
   onClose: () => void;
 }
 
-export function ChartModal({ symbol, onClose }: Props) {
+export function ChartModal({ symbol, entryPrice, onClose }: Props) {
   if (!symbol) return null;
 
   const label = labelFromSymbol(symbol);
@@ -70,7 +71,7 @@ export function ChartModal({ symbol, onClose }: Props) {
 
         {/* Chart */}
         <div style={{ flex: 1, minHeight: 400 }}>
-          <CandleChart symbol={symbol} height={400} />
+          <CandleChart symbol={symbol} height={400} priceLevels={entryPrice ? [{ price: entryPrice, label: "Entry", color: "#f97316" }] : []} />
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import { labelFromSymbol } from "@/lib/constants";
 import type { EnrichedPosition, Transaction } from "@/types";
 import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
+import { TokenIcon } from "@/components/TokenIcon";
 import { PositionDetail } from "@/components/PositionDetail";
 import { TerminalView } from "@/components/TerminalView";
 import { AddSheet } from "@/components/AddSheet";
@@ -391,6 +392,7 @@ function PortfolioView() {
                 onClick={() => setChartPreview(`HL:${o.coin}`)}
                 style={{ padding: "10px 14px", borderTop: "1px solid var(--card-border)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <TokenIcon symbol={`HL:${o.coin}`} size={20} />
                   <span style={{ fontSize: "13px", fontWeight: 500 }}>{o.coin}</span>
                   <span style={{ fontSize: "10px", fontWeight: 600, fontFamily: theme.mono, color: o.side === "B" ? "var(--green)" : "var(--red)", padding: "1px 4px", borderRadius: "3px", background: o.side === "B" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)" }}>
                     {o.side === "B" ? "BUY" : "SELL"}{o.reduceOnly ? " TP" : ""}
@@ -508,7 +510,11 @@ function PortfolioView() {
         onClose={() => { setShowSync(false); }}
       />
       {chartPreview && (
-        <ChartPreviewSheet symbol={chartPreview} onClose={() => setChartPreview(null)} />
+        <ChartPreviewSheet
+          symbol={chartPreview}
+          entryPrice={hl.positions.find(p => p.symbol === chartPreview)?.hlMeta?.entryPx}
+          onClose={() => setChartPreview(null)}
+        />
       )}
       <TabBar
         active="portfolio"

@@ -138,7 +138,7 @@ export function tokenIcon(symbol: string, size = 64): string | null {
     return `https://s3-symbol-logo.tradingview.com/${asset.cgId}.svg`;
   }
   // Crypto: try TradingView crypto CDN
-  const baseSymbol = symbol.replace("BINANCE:", "").replace("BUSDT", "").replace("USDT", "");
+  const baseSymbol = symbol.replace("HL:", "").replace("BINANCE:", "").replace("BUSDT", "").replace("USDT", "");
   if (baseSymbol) {
     return `https://s3-symbol-logo.tradingview.com/crypto/XTVC${baseSymbol}.svg`;
   }

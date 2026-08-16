@@ -41,6 +41,11 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
   const [showWidgets, setShowWidgets] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [modalSymbol, setModalSymbol] = useState<string | null>(null);
+  const modalEntryPrice = useMemo(() => {
+    if (!modalSymbol) return undefined;
+    const pos = positions.find(p => p.symbol === modalSymbol);
+    return pos?.hlMeta?.entryPx ?? pos?.avgCost;
+  }, [modalSymbol, positions]);
   const [showSearch, setShowSearch] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(() => {
     const saved = localStorage.getItem("terminal-watchlist");
@@ -548,7 +553,7 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
         </div>
       )}
 
-      <ChartModal symbol={modalSymbol} onClose={() => setModalSymbol(null)} />
+      <ChartModal symbol={modalSymbol} entryPrice={modalEntryPrice} onClose={() => setModalSymbol(null)} />
       
       {showSearch && (
         <SearchModal
@@ -624,7 +629,7 @@ function MobilePositionCard({ position, onClick }: {
 
       {/* Mini chart */}
       <div style={{ height: 120, background: "rgba(0,0,0,0.15)" }}>
-        <CandleChart symbol={position.symbol} height={120} />
+        <CandleChart symbol={position.symbol} height={120} priceLevels={position.hlMeta?.entryPx ? [{ price: position.hlMeta.entryPx, label: "Entry", color: "#f97316" }] : []} />
       </div>
 
       {/* Footer */}
@@ -733,7 +738,7 @@ function TerminalCard({
         background: "rgba(0,0,0,0.15)", 
         overflow: "hidden",
       }}>
-        <CandleChart symbol={position.symbol} height={panel.height - 70} />
+        <CandleChart symbol={position.symbol} height={panel.height - 70} priceLevels={position.hlMeta?.entryPx ? [{ price: position.hlMeta.entryPx, label: "Entry", color: "#f97316" }] : []} />
       </div>
 
       {/* Footer */}
