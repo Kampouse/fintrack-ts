@@ -32,18 +32,19 @@ function mapHLPositions(
   return hlPositions
     .map((hp) => {
       const pos = hp.position;
-      if (!pos || Math.abs(pos.size) === 0) return null;
+      if (!pos || Math.abs(parseFloat(String(pos.szi))) === 0) return null;
 
       const symbol = `HL:${pos.coin}`;
-      const absQty = Math.abs(pos.size);
-      const entryPrice = pos.entryPx;
+      const size = parseFloat(String(pos.szi));
+      const absQty = Math.abs(size);
+      const entryPrice = parseFloat(String(pos.entryPx));
       const mid = mids[pos.coin];
       const price = mid ?? null;
       const value = price != null ? price * absQty : null;
       const totalCost = absQty * entryPrice;
-      const pnl = value != null ? (pos.size > 0 ? value - totalCost : totalCost - value) : null;
+      const pnl = value != null ? (size > 0 ? value - totalCost : totalCost - value) : null;
       const pnlPct = totalCost > 0 && pnl != null ? (pnl / totalCost) * 100 : null;
-      const isShort = pos.size < 0;
+      const isShort = size < 0;
 
       return {
         symbol,
@@ -70,9 +71,9 @@ function mapHLPositions(
         dayChange: null,
         changePct: null,
         hlMeta: {
-          margin: pos.margin,
+          margin: pos.margin ?? 0,
           leverage: pos.leverage?.value ?? 1,
-          liquidationPx: pos.liquidationPx,
+          liquidationPx: pos.liquidationPx != null ? parseFloat(String(pos.liquidationPx)) : null,
           funding: hp.funding ?? 0,
         },
       } as EnrichedPosition & { hlMeta: HLPositionMeta };

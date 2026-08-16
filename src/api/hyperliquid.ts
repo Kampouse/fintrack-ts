@@ -144,15 +144,15 @@ export async function searchHLCoins(query: string): Promise<HLMid[]> {
 export interface HLUserPosition {
   position: {
     coin: string;
-    size: number;        // positive = long, negative = short
-    entryPx: number;
-    margin: number;
-    leverage: { type: string; value: number };
-    liquidationPx: number | null;
-    curAvgCost: number;
+    szi: string;           // size as string, positive = long, negative = short
+    entryPx: string;       // entry price as string
+    margin: number | null;
+    leverage: { type: string; value: number } | undefined;
+    liquidationPx: string | null;
+    curAvgCost: string;
   };
-  returnPnl: string;      // cumulative P&L string
-  funding: number;       // total funding paid/received
+  returnPnl: string;
+  funding: number;
 }
 
 export interface HLUserTrade {
@@ -181,9 +181,8 @@ export async function getClearinghouseState(wallet: string): Promise<HLUserPosit
   });
   if (!res.ok) return [];
   const data = await res.json();
-  // data is [positions...]
-  const positions: HLUserPosition[] = Array.isArray(data) ? data[0] ?? [] : [];
-  return positions.filter((p: HLUserPosition) => p.position && Math.abs(p.position.size) > 0);
+  const positions: HLUserPosition[] = data?.assetPositions ?? [];
+  return positions.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0);
 }
 
 /** Trade history for a wallet */
