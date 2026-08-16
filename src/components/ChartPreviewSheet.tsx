@@ -6,10 +6,11 @@ import { labelFromSymbol } from "@/lib/constants";
 interface Props {
   symbol: string;
   entryPrice?: number;
+  priceLabel?: string;
   onClose: () => void;
 }
 
-export function ChartPreviewSheet({ symbol, entryPrice, onClose }: Props) {
+export function ChartPreviewSheet({ symbol, entryPrice, priceLabel = "Entry", onClose }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(() => window.innerWidth >= 680);
   const isDesktop = wide;
@@ -85,7 +86,7 @@ export function ChartPreviewSheet({ symbol, entryPrice, onClose }: Props) {
         </div>
         {/* Chart fills remaining space */}
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-          <CandleChart symbol={symbol} height={600} priceLevels={entryPrice ? [{ price: entryPrice, label: "Entry", color: "#f97316" }] : []} />
+          <CandleChart symbol={symbol} height={600} priceLevels={entryPrice ? [{ price: entryPrice, label: priceLabel, color: "#f97316" }] : []} />
         </div>
       </div>
     </div>

@@ -67,6 +67,8 @@ function PortfolioView() {
   const [sortAsc, setSortAsc] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [chartPreview, setChartPreview] = useState<string | null>(null);
+  const [chartPreviewPrice, setChartPreviewPrice] = useState<number | undefined>(undefined);
+  const [chartPreviewLabel, setChartPreviewLabel] = useState<string>("Entry");
   const navigate = useNavigate();
 
   // Close sort dropdown on outside click
@@ -398,7 +400,11 @@ function PortfolioView() {
           <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden" }}>
             {hl.orders.map((o) => (
               <div key={o.oid}
-                onClick={() => setChartPreview(`HL:${o.coin}`)}
+                onClick={() => {
+                  setChartPreview(`HL:${o.coin}`);
+                  setChartPreviewPrice(Number(o.limitPx));
+                  setChartPreviewLabel("Limit");
+                }}
                 style={{ padding: "10px 14px", borderTop: "1px solid var(--card-border)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <TokenIcon symbol={`HL:${o.coin}`} size={20} />
@@ -435,7 +441,7 @@ function PortfolioView() {
       )}
       <HelpSheet open={showHelp} onClose={() => { setShowHelp(false); }} />
       {showWatch && (
-        <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); }} />
+        <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); setChartPreviewPrice(undefined); setChartPreviewLabel("Entry"); }} />
       )}
       {showHlSettings && (
         <>
@@ -521,8 +527,9 @@ function PortfolioView() {
       {chartPreview && (
         <ChartPreviewSheet
           symbol={chartPreview}
-          entryPrice={hl.positions.find(p => p.symbol === chartPreview)?.hlMeta?.entryPx}
-          onClose={() => setChartPreview(null)}
+          entryPrice={hl.positions.find(p => p.symbol === chartPreview)?.hlMeta?.entryPx ?? chartPreviewPrice}
+          priceLabel={chartPreviewLabel}
+          onClose={() => { setChartPreview(null); setChartPreviewPrice(undefined); setChartPreviewLabel("Entry"); }}
         />
       )}
       <TabBar
