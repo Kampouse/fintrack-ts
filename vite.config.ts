@@ -11,4 +11,15 @@ export default defineConfig({
   server: {
     allowedHosts: [".trycloudflare.com", "localhost"],
   },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ["echarts"],
+          "react-vendor": ["react", "react-dom", "react-router-dom"],
+        },
+      },
+    },
+  },
 });

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { HashRouter, Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
 import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw, LayoutGrid, BarChart3, Search, Zap, X } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
@@ -11,8 +11,6 @@ import type { EnrichedPosition, Transaction } from "@/types";
 import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
 import { TokenIcon } from "@/components/TokenIcon";
-import { PositionDetail } from "@/components/PositionDetail";
-import { TerminalView } from "@/components/TerminalView";
 import { AddSheet } from "@/components/AddSheet";
 import { HelpSheet } from "@/components/HelpSheet";
 import { WatchList } from "@/components/WatchList";
@@ -25,6 +23,17 @@ import { SearchModal } from "@/components/SearchModal";
 import { btnIcon, theme, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
 import { pullPositions, useSyncPush } from "@/lib/kv";
+
+const PositionDetail = lazy(() => import("@/components/PositionDetail").then(m => ({ default: m.PositionDetail })));
+const TerminalView = lazy(() => import("@/components/TerminalView").then(m => ({ default: m.TerminalView })));
+
+function RouteFallback() {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%", color: "var(--text-dim)" }}>
+      <SkeletonCard />
+    </div>
+  );
+}
 
 type SortKey = "value" | "pnl" | "name" | "change";
 type SourceFilter = "all" | "local" | "hyperliquid";
@@ -805,11 +814,13 @@ function PositionRoute() {
 export default function App() {
   return (
     <HashRouter>
-      <Routes>
-        <Route path="/" element={<PortfolioView />} />
-        <Route path="/terminal" element={<TerminalRoute />} />
-        <Route path="/position/:symbol" element={<PositionRoute />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<PortfolioView />} />
+          <Route path="/terminal" element={<TerminalRoute />} />
+          <Route path="/position/:symbol" element={<PositionRoute />} />
+        </Routes>
+      </Suspense>
     </HashRouter>
   );
 }
