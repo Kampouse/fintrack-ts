@@ -6,7 +6,12 @@ const TX_KEY = "fintrack_transactions";
 
 function loadTransactions(): Transaction[] {
   try {
-    return JSON.parse(localStorage.getItem(TX_KEY) || "[]");
+    const raw = JSON.parse(localStorage.getItem(TX_KEY) || "[]") as Transaction[];
+    // Migrate: old txs without `side` are buys
+    for (const t of raw) {
+      if (!t.side) t.side = "buy";
+    }
+    return raw;
   } catch {
     return [];
   }
@@ -22,7 +27,14 @@ export function useTransactions() {
   const addLot = useCallback((symbol: string, qty: number, price: number, note?: string, ts?: number) => {
     setTxs((prev) => [
       ...prev,
-      { id: uid(), symbol, qty, price, ts: ts ?? Date.now(), ...(note?.trim() ? { note: note.trim() } : {}) },
+      { id: uid(), symbol, side: "buy" as const, qty, price, ts: ts ?? Date.now(), ...(note?.trim() ? { note: note.trim() } : {}) },
+    ]);
+  }, []);
+
+  const sellLot = useCallback((symbol: string, qty: number, price: number, note?: string, ts?: number) => {
+    setTxs((prev) => [
+      ...prev,
+      { id: uid(), symbol, side: "sell" as const, qty, price, ts: ts ?? Date.now(), ...(note?.trim() ? { note: note.trim() } : {}) },
     ]);
   }, []);
 
@@ -34,5 +46,5 @@ export function useTransactions() {
     setTxs((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  return { txs, setTxs, addLot, updateLot, removeLot };
+  return { txs, setTxs, addLot, sellLot, updateLot, removeLot };
 }

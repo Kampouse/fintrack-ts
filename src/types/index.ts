@@ -1,6 +1,9 @@
+export type Side = "buy" | "sell";
+
 export interface Transaction {
   id: string;
   symbol: string;
+  side: Side;
   qty: number;
   price: number;
   ts: number;
@@ -18,6 +21,16 @@ export interface Quote {
   ts: number | null;
 }
 
+export interface RealizedSale {
+  id: string;
+  ts: number;
+  qty: number;
+  price: number;
+  costBasis: number;
+  realized: number;
+  realizedPct: number;
+}
+
 export interface Position {
   symbol: string;
   label: string;
@@ -25,6 +38,7 @@ export interface Position {
   totalCost: number;
   avgCost: number;
   lots: Transaction[];
+  realized: RealizedSale[];
 }
 
 export interface EnrichedPosition extends Position {

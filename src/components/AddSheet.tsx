@@ -7,11 +7,14 @@ import { getMarketTickers, type MarketTicker } from "@/api/binance";
 import { TokenIcon } from "./TokenIcon";
 import { card, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
+import type { Side } from "@/types";
 
 interface Props {
   onClose: () => void;
-  onSave: (symbol: string, qty: number, price: number, note?: string) => void;
+  onSave: (symbol: string, qty: number, price: number, side: Side, note?: string) => void;
   preselect?: string | null;
+  /** Force a specific mode (e.g. only allow sells on a position) */
+  forceSide?: Side;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -36,13 +39,21 @@ interface StockResult {
   description: string;
 }
 
-type CombinedResult = CryptoResult | StockResult;
+interface HLResult {
+  type: "hl";
+  symbol: string;
+  name: string;
+  price: number;
+}
 
-export function AddSheet({ onClose, onSave, preselect }: Props) {
+type CombinedResult = CryptoResult | StockResult | HLResult;
+
+export function AddSheet({ onClose, onSave, preselect, forceSide }: Props) {
   const [symbol, setSymbol] = useState(preselect || "");
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
   const [note, setNote] = useState("");
+  const [side, setSide] = useState<Side>(forceSide ?? "buy");
   const [liveQuote, setLiveQuote] = useState<Quote | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const priceRef = useRef(false);
@@ -140,6 +151,9 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
   const label = preselect ? labelFromSymbol(symbol) : null;
   const showSearchResults = searchQuery.trim().length > 0;
 
+  const isSell = side === "sell";
+  const accentColor = isSell ? "#ef4444" : "#22c55e";
+
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 250 }} />
@@ -150,7 +164,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
           left: 0,
           right: 0,
           background: "var(--bg)",
-          borderTop: "1px solid var(--card-border)",
+          borderTop: `1px solid ${isSell ? "rgba(239,68,68,0.3)" : "var(--card-border)"}`,
           borderRadius: "24px 24px 0 0",
           padding: "20px 16px 32px",
           zIndex: 260,
@@ -162,11 +176,39 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
         className="sheet-enter"
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h2 style={{ fontSize: "18px", fontWeight: 600 }}>Add Buy</h2>
+          <h2 style={{ fontSize: "18px", fontWeight: 600, color: isSell ? "#ef4444" : "var(--text)" }}>
+            {forceSide ? (isSell ? "Sell" : "Buy") : `Add ${isSell ? "Sell" : "Buy"}`}
+          </h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px" }}>
             <X size={20} color="var(--text-dim)" />
           </button>
         </div>
+
+        {/* Buy/Sell toggle (only when not forced) */}
+        {!forceSide && (
+          <div style={{ display: "flex", gap: "4px", marginBottom: "16px", padding: "3px", background: "var(--card)", borderRadius: "10px", border: "1px solid var(--card-border)" }}>
+            {(["buy", "sell"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSide(s)}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: side === s ? (s === "buy" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)") : "transparent",
+                  color: side === s ? accentColor : "var(--text-dim)",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                {s === "buy" ? "Buy" : "Sell"}
+              </button>
+            ))}
+          </div>
+        )}
 
         {preselect && label ? (
           <div style={{ ...card, padding: "12px 14px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -221,14 +263,14 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text)" }}>
                         {r.name}
-                        {r.type === "stock" && (
+                        {(r.type === "stock" || r.type === "hl") && (
                           <span style={{ fontSize: "10px", color: "var(--text-dim)", marginLeft: 6, fontWeight: 400 }}>
                             ({r.symbol})
                           </span>
                         )}
                       </div>
                       <div style={{ fontSize: "12px", color: "var(--text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {r.type === "stock" ? r.description : r.type === "crypto" ? `$${r.price >= 1 ? r.price.toFixed(2) : r.price.toFixed(6)}` : ""}
+                        {r.type === "stock" ? r.description : r.type === "hl" ? `$${r.price.toFixed(2)}` : `$${r.price >= 1 ? r.price.toFixed(2) : r.price.toFixed(6)}`}
                       </div>
                     </div>
                     {r.type === "crypto" && (
@@ -239,11 +281,14 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
                     {r.type === "stock" && (
                       <span style={{ fontSize: "10px", color: "var(--lime)", padding: "2px 6px", borderRadius: "4px", background: "var(--lime-dim)", flexShrink: 0 }}>STOCK</span>
                     )}
+                    {r.type === "hl" && (
+                      <span style={{ fontSize: "10px", color: "var(--orange)", padding: "2px 6px", borderRadius: "4px", background: "rgba(249,115,22,0.1)", flexShrink: 0 }}>HL</span>
+                    )}
                   </button>
                 ))}
               </div>
             ) : symbol ? (
-              /* Selected asset chip (from grid tap) */
+              /* Selected asset chip */
               <div style={{ ...card, padding: "12px 14px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
                 <TokenIcon symbol={symbol} size={28} />
                 <span style={{ fontSize: "16px", fontWeight: 600 }}>{labelFromSymbol(symbol)}</span>
@@ -255,7 +300,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
                 </button>
               </div>
             ) : (
-              /* Crypto quick-grid (original) */
+              /* Crypto quick-grid */
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
                 {ALL_SYMBOLS.map((c) => (
                   <button
@@ -295,7 +340,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
           <input
             type="number"
             inputMode="decimal"
-            placeholder="Buy price (USD)"
+            placeholder={`${isSell ? "Sell" : "Buy"} price (USD)`}
             value={price}
             onChange={(e) => handlePriceChange(e.target.value)}
             style={input}
@@ -312,14 +357,14 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
         </div>
 
         <button
-          onClick={() => valid && onSave(symbol, parseFloat(qty), parseFloat(price), note.trim() || undefined)}
+          onClick={() => valid && onSave(symbol, parseFloat(qty), parseFloat(price), side, note.trim() || undefined)}
           disabled={!valid}
           style={{
             width: "100%",
             padding: "14px",
             borderRadius: "12px",
             border: "none",
-            background: valid ? "#22c55e" : "var(--card-border)",
+            background: valid ? accentColor : "var(--card-border)",
             color: valid ? "#fff" : "var(--text-dim)",
             fontSize: "15px",
             fontWeight: 600,
@@ -327,7 +372,7 @@ export function AddSheet({ onClose, onSave, preselect }: Props) {
             marginTop: "12px",
           }}
         >
-          Add Buy
+          {isSell ? "Log Sell" : "Add Buy"}
         </button>
       </div>
     </>

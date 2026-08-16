@@ -3,9 +3,10 @@ import { HashRouter, Routes, Route, useNavigate, useParams, useLocation } from "
 import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw, LayoutGrid, BarChart3, Search } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
+import { usePositions, positionSymbols } from "@/hooks/usePositions";
 import { useNearAuth } from "@/contexts/NearAuth";
 import { labelFromSymbol } from "@/lib/constants";
-import type { EnrichedPosition, Position, Transaction } from "@/types";
+import type { EnrichedPosition, Transaction } from "@/types";
 import { PortfolioSummary } from "@/components/PortfolioSummary";
 import { PositionCard } from "@/components/PositionCard";
 import { PositionDetail } from "@/components/PositionDetail";
@@ -32,8 +33,9 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 function PortfolioView() {
-  const { txs, setTxs, addLot, updateLot, removeLot } = useTransactions();
+  const { txs, setTxs, addLot, sellLot, updateLot, removeLot } = useTransactions();
   const [showAdd, setShowAdd] = useState(false);
+  const [addSide, setAddSide] = useState<"buy" | "sell">("buy");
   const [showHelp, setShowHelp] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
@@ -57,8 +59,9 @@ function PortfolioView() {
   }, [showSortDD]);
 
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
-  const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
-  const { quotes } = useQuotes(positionSymbols);
+  const symbols = positionSymbols(txs);
+  const { quotes } = useQuotes(symbols);
+  const enriched = usePositions(txs, quotes);
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
@@ -74,43 +77,6 @@ function PortfolioView() {
       setRemoteCount(data?.length ?? null);
     });
   }, [showSync, isConnected, syncOn, accountId]);
-
-  // Aggregate transactions into positions
-  const positions: Position[] = useMemo(() => {
-    const map = new Map<string, Position>();
-    for (const tx of txs) {
-      const existing = map.get(tx.symbol);
-      if (existing) {
-        existing.lots.push(tx);
-        existing.qty += tx.qty;
-        existing.totalCost += tx.qty * tx.price;
-        existing.avgCost = existing.totalCost / existing.qty;
-      } else {
-        map.set(tx.symbol, {
-          symbol: tx.symbol,
-          label: labelFromSymbol(tx.symbol),
-          qty: tx.qty,
-          totalCost: tx.qty * tx.price,
-          avgCost: tx.price,
-          lots: [tx],
-        });
-      }
-    }
-    return [...map.values()];
-  }, [txs]);
-
-  // Enrich positions with live quote data
-  const enriched: EnrichedPosition[] = useMemo(() => {
-    return positions.map((p) => {
-      const q = quotes[p.symbol];
-      const price = q?.price ?? null;
-      const value = price != null ? price * p.qty : null;
-      const pnl = value != null ? value - p.totalCost : null;
-      const pnlPct = p.totalCost > 0 && pnl != null ? (pnl / p.totalCost) * 100 : null;
-      const dayChange = value != null && q?.changePct != null ? (value * q.changePct) / 100 : null;
-      return { ...p, price, value, pnl, pnlPct, dayChange, changePct: q?.changePct ?? null };
-    });
-  }, [positions, quotes]);
 
   // Sorted positions
   const sorted = useMemo(() => {
@@ -358,8 +324,12 @@ function PortfolioView() {
 
       {showAdd && (
         <AddSheet
-          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); setAddSide("buy"); }}
+          onSave={(sym, qty, price, side, note) => {
+            if (side === "sell") sellLot(sym, qty, price, note);
+            else addLot(sym, qty, price, note);
+            setShowAdd(false); setPreselectSymbol(null); setAddSide("buy");
+          }}
           preselect={preselectSymbol}
         />
       )}
@@ -401,11 +371,12 @@ const TF_OPTIONS = [
 ] as const;
 
 function TerminalRoute() {
-  const { txs, addLot } = useTransactions();
+  const { txs, addLot, sellLot } = useTransactions();
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const navigate = useNavigate();
-  const positionSymbols = useMemo(() => [...new Set(txs.map((t) => t.symbol))], [txs]);
-  const { quotes } = useQuotes(positionSymbols);
+  const symbols = positionSymbols(txs);
+  const { quotes } = useQuotes(symbols);
+  const enriched = usePositions(txs, quotes);
 
   // Terminal toolbar state (lifted from TerminalView)
   const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
@@ -427,43 +398,6 @@ function TerminalRoute() {
       prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol]
     );
   }, []);
-
-  // Aggregate transactions into positions
-  const positions: Position[] = useMemo(() => {
-    const map = new Map<string, Position>();
-    for (const tx of txs) {
-      const existing = map.get(tx.symbol);
-      if (existing) {
-        existing.lots.push(tx);
-        existing.qty += tx.qty;
-        existing.totalCost += tx.qty * tx.price;
-        existing.avgCost = existing.totalCost / existing.qty;
-      } else {
-        map.set(tx.symbol, {
-          symbol: tx.symbol,
-          label: labelFromSymbol(tx.symbol),
-          qty: tx.qty,
-          totalCost: tx.qty * tx.price,
-          avgCost: tx.price,
-          lots: [tx],
-        });
-      }
-    }
-    return [...map.values()];
-  }, [txs]);
-
-  // Enrich positions with live quote data
-  const enriched: EnrichedPosition[] = useMemo(() => {
-    return positions.map((p) => {
-      const q = quotes[p.symbol];
-      const price = q?.price ?? null;
-      const value = price != null ? price * p.qty : null;
-      const pnl = value != null ? value - p.totalCost : null;
-      const pnlPct = p.totalCost > 0 && pnl != null ? (pnl / p.totalCost) * 100 : null;
-      const dayChange = value != null && q?.changePct != null ? (value * q.changePct) / 100 : null;
-      return { ...p, price, value, pnl, pnlPct, dayChange, changePct: q?.changePct ?? null };
-    });
-  }, [positions, quotes]);
 
   const [showAdd, setShowAdd] = useState(false);
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
@@ -612,7 +546,11 @@ function TerminalRoute() {
       {showAdd && (
         <AddSheet
           onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+          onSave={(sym, qty, price, side, note) => {
+            if (side === "sell") sellLot(sym, qty, price, note);
+            else addLot(sym, qty, price, note);
+            setShowAdd(false); setPreselectSymbol(null);
+          }}
           preselect={preselectSymbol}
         />
       )}
@@ -624,7 +562,7 @@ function PositionRoute() {
   const { symbol } = useParams<{ symbol: string }>();
   const decodedSymbol = symbol ? decodeURIComponent(symbol) : "";
   const navigate = useNavigate();
-  const { txs, addLot, updateLot, removeLot } = useTransactions();
+  const { txs, addLot, sellLot, updateLot, removeLot } = useTransactions();
   const positionSymbols = useMemo(() => {
     const all = new Set(txs.map((t) => t.symbol));
     if (decodedSymbol) all.add(decodedSymbol);
@@ -632,6 +570,7 @@ function PositionRoute() {
   }, [txs, decodedSymbol]);
   const { quotes } = useQuotes(positionSymbols);
   const [showAdd, setShowAdd] = useState(false);
+  const [addSide, setAddSide] = useState<"buy" | "sell">("buy");
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [terminalView, setTerminalView] = useState(false);
 
@@ -651,6 +590,12 @@ function PositionRoute() {
         onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}
         onAddLot={() => {
           setPreselectSymbol(decodedSymbol);
+          setAddSide("buy");
+          setShowAdd(true);
+        }}
+        onSellLot={() => {
+          setPreselectSymbol(decodedSymbol);
+          setAddSide("sell");
           setShowAdd(true);
         }}
         terminal={terminalView}
@@ -658,9 +603,14 @@ function PositionRoute() {
       />
       {showAdd && (
         <AddSheet
-          onClose={() => { setShowAdd(false); setPreselectSymbol(null); }}
-          onSave={(sym, qty, price, note) => { addLot(sym, qty, price, note); setShowAdd(false); setPreselectSymbol(null); }}
+          onClose={() => { setShowAdd(false); setPreselectSymbol(null); setAddSide("buy"); }}
+          onSave={(sym, qty, price, side, note) => {
+            if (side === "sell") sellLot(sym, qty, price, note);
+            else addLot(sym, qty, price, note);
+            setShowAdd(false); setPreselectSymbol(null); setAddSide("buy");
+          }}
           preselect={preselectSymbol}
+          forceSide={addSide}
         />
       )}
     </div>

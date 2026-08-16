@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { ChevronLeft, Trash2, Pencil, Plus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { ChevronLeft, Trash2, Pencil, Plus, Minus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen } from "lucide-react";
 import type { Transaction, Quote, Position } from "@/types";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
@@ -42,11 +42,12 @@ interface Props {
   onRemoveLot: (id: string) => void;
   onEditLot: (lot: Transaction) => void;
   onAddLot: () => void;
+  onSellLot: () => void;
   terminal: boolean;
   onToggleTerminal: () => void;
 }
 
-export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot, terminal, onToggleTerminal }: Props) {
+export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot, onSellLot, terminal, onToggleTerminal }: Props) {
   const [editLot, setEditLot] = useState<Transaction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
@@ -71,6 +72,21 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
   const pnlColor = pnl != null ? (pnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
   const kPnlColor = pnl != null ? (pnl >= 0 ? K.green : K.red) : K.dim;
   const changeColor = (quote?.changePct ?? 0) >= 0 ? K.green : K.red;
+
+  // Realized P&L from sells (FIFO)
+  const buys = lots.filter((l) => l.side === "buy" || !l.side).map((l) => ({ ...l }));
+  const sellTxs = lots.filter((l) => l.side === "sell");
+  let realizedPnl = 0;
+  for (const sell of sellTxs) {
+    let qtyLeft = sell.qty;
+    for (const buy of buys) {
+      if (qtyLeft <= 0 || buy.qty <= 0) continue;
+      const match = Math.min(qtyLeft, buy.qty);
+      realizedPnl += match * (sell.price - buy.price);
+      buy.qty -= match;
+      qtyLeft -= match;
+    }
+  }
 
   // Running avg cost per lot
   let runCost = 0;
@@ -133,6 +149,14 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
           {pnl != null ? `${fmtUsd(pnl, 0)} ${fmtPct(pnlPct)}` : "--"}
         </div>
       </div>
+      {sellTxs.length > 0 && (
+        <div>
+          <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Realized</div>
+          <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono, color: realizedPnl >= 0 ? K.green : K.red }}>
+            {fmtUsd(realizedPnl, 0)} {realizedPnl !== 0 ? fmtPct(totalCost > 0 ? (realizedPnl / totalCost) * 100 : 0) : ""}
+          </div>
+        </div>
+      )}
       <div>
         <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg</div>
         <div style={{ fontSize: "14px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsdPrice(avgCost)}</div>
@@ -150,16 +174,18 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
       </div>
       <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden" }}>
         {lotRows.map(({ lot, runAvg }, i) => {
-          const lotValue = price != null ? price * lot.qty : null;
+          const isSell = lot.side === "sell";
+          const lotValue = isSell ? null : price != null ? price * lot.qty : null;
           const lotPnl = lotValue != null ? lotValue - lot.qty * lot.price : null;
           const lotColor = lotPnl != null ? (lotPnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
 
           return (
-            <div key={lot.id} style={{ ...row, padding: "12px 14px" }}>
+            <div key={lot.id} style={{ ...row, padding: "12px 14px", borderLeft: isSell ? "3px solid #ef4444" : "3px solid transparent" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span style={{ fontSize: "13px", color: "var(--text-dim)" }}>#{i + 1}</span>
-                  <span style={{ fontSize: "15px", fontWeight: 500, marginLeft: "8px", fontFamily: theme.mono }}>
+                  {isSell && <span style={{ fontSize: "10px", color: "#ef4444", marginLeft: "6px", fontWeight: 600, fontFamily: theme.mono }}>SELL</span>}
+                  <span style={{ fontSize: "15px", fontWeight: 500, marginLeft: "8px", fontFamily: theme.mono, color: isSell ? "#ef4444" : "var(--text)" }}>
                     {fmtQty(lot.qty)} @ {fmtUsdPrice(lot.price)}
                   </span>
                   <span style={{ fontSize: "12px", color: "var(--text-dim)", marginLeft: "8px" }}>{fmtDate(lot.ts)}</span>
@@ -221,6 +247,9 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         <TokenIcon symbol={symbol} size={32} />
         <h1 style={{ fontSize: "20px", fontWeight: 600 }}>{label}</h1>
         <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <button onClick={onSellLot} style={btnIcon} aria-label="Sell">
+            <Minus size={18} color="#ef4444" />
+          </button>
           <button onClick={onAddLot} style={btnIcon} aria-label="Add to position">
             <Plus size={18} color="var(--lime)" />
           </button>
