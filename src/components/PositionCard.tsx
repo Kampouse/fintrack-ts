@@ -79,6 +79,11 @@ export function PositionCard({ pos, onClick, onDelete }: Props) {
                 {isHL && (
                   <span style={{ fontSize: "9px", fontWeight: 700, fontFamily: theme.mono, color: "#f97316", padding: "2px 5px", borderRadius: "4px", background: "rgba(249,115,22,0.12)" }}>LIVE</span>
                 )}
+                {isHL && pos.hlMeta && (
+                  <span style={{ fontSize: "9px", fontWeight: 600, fontFamily: theme.mono, color: "var(--text-dim)", padding: "1px 4px", borderRadius: "3px", background: "rgba(255,255,255,0.05)" }}>
+                    {pos.hlMeta.leverage}x
+                  </span>
+                )}
               </div>
               <span style={{
                 fontSize: 11,

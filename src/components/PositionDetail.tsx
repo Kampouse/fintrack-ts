@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
-import { ChevronLeft, Trash2, Pencil, Plus, Minus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen } from "lucide-react";
-import type { Transaction, Quote, Position } from "@/types";
+import { ChevronLeft, Trash2, Pencil, Plus, Minus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen, ExternalLink } from "lucide-react";
+import type { Transaction, Quote, Position, HLPositionMeta } from "@/types";
+import type { HLUserFill } from "@/api/hyperliquid";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
 import { CandleChart, type PriceLevel } from "./CandleChart";
@@ -39,6 +40,8 @@ interface Props {
   txs: Transaction[];
   quote: Quote | undefined;
   entryPrice?: number;
+  hlMeta?: HLPositionMeta;
+  recentFills?: HLUserFill[];
   onBack: () => void;
   onRemoveLot: (id: string) => void;
   onEditLot: (lot: Transaction) => void;
@@ -48,7 +51,7 @@ interface Props {
   onToggleTerminal: () => void;
 }
 
-export function PositionDetail({ symbol, txs, quote, entryPrice, onBack, onRemoveLot, onEditLot, onAddLot, onSellLot, terminal, onToggleTerminal }: Props) {
+export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentFills, onBack, onRemoveLot, onEditLot, onAddLot, onSellLot, terminal, onToggleTerminal }: Props) {
   const [editLot, setEditLot] = useState<Transaction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
@@ -257,12 +260,40 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, onBack, onRemov
         <TokenIcon symbol={symbol} size={32} />
         <h1 style={{ fontSize: "20px", fontWeight: 600 }}>{label}</h1>
         <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
-          <button onClick={onSellLot} style={btnIcon} aria-label="Sell">
-            <Minus size={18} color="#ef4444" />
-          </button>
-          <button onClick={onAddLot} style={btnIcon} aria-label="Add to position">
-            <Plus size={18} color="var(--lime)" />
-          </button>
+          {hlMeta ? (
+            <a
+              href={`https://app.hyperliquid.xyz/trade/${encodeURIComponent(symbol.replace("HL:", ""))}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: "1px solid rgba(249,115,22,0.3)",
+                background: "rgba(249,115,22,0.08)",
+                color: "#f97316",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                textDecoration: "none",
+                fontFamily: theme.mono,
+              }}
+            >
+              <ExternalLink size={14} />
+              Close on HL
+            </a>
+          ) : (
+            <>
+              <button onClick={onSellLot} style={btnIcon} aria-label="Sell">
+                <Minus size={18} color="#ef4444" />
+              </button>
+              <button onClick={onAddLot} style={btnIcon} aria-label="Add to position">
+                <Plus size={18} color="var(--lime)" />
+              </button>
+            </>
+          )}
           <button
             onClick={onToggleTerminal}
             style={{
@@ -323,6 +354,24 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, onBack, onRemov
         <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
       </div>
 
+      {/* HL-specific stats */}
+      {hlMeta && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginBottom: 12 }}>
+          <div style={{ ...card, padding: "10px 12px" }}>
+            <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Leverage</div>
+            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: hlMeta.leverage > 5 ? "#f97316" : "var(--text)" }}>{hlMeta.leverage}x</div>
+          </div>
+          <div style={{ ...card, padding: "10px 12px" }}>
+            <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Margin</div>
+            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono }}>{fmtUsd(hlMeta.margin, 0)}</div>
+          </div>
+          <div style={{ ...card, padding: "10px 12px" }}>
+            <div style={{ fontSize: "10px", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Liq Price</div>
+            <div style={{ fontSize: "15px", fontWeight: 600, fontFamily: theme.mono, color: "var(--red)" }}>{hlMeta.liquidationPx != null ? fmtUsdPrice(hlMeta.liquidationPx) : "--"}</div>
+          </div>
+        </div>
+      )}
+
       {/* Normal view — metrics left, lots below */}
       <div data-detail-row style={{ display: "flex", gap: "var(--app-hpad, 16px)", marginBottom: 16 }}>
         <div style={{ ...card, flex: 1, padding: '12px 16px' }}>
@@ -352,7 +401,41 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, onBack, onRemov
         </div>
       </div>
       <style>{`@media (max-width: 639px) { [data-detail-row] { flex-direction: column !important; } }`}</style>
-      {lotsSection}
+      {(!hlMeta || lots.length > 0) && lotsSection}
+
+      {/* HL recent fills */}
+      {hlMeta && recentFills && recentFills.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-dim)", marginBottom: "8px" }}>
+            Recent Fills
+          </div>
+          <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden" }}>
+            {recentFills.slice(0, 10).map((f, i) => (
+              <div key={`${f.hash}-${i}`} style={{ padding: "8px 14px", borderTop: i > 0 ? "1px solid var(--card-border)" : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: "10px", fontWeight: 600, fontFamily: theme.mono, color: f.side === "B" ? "var(--green)" : "var(--red)" }}>
+                    {f.side === "B" ? "BUY" : "SELL"}
+                  </span>
+                  <span style={{ fontSize: "11px", fontFamily: theme.mono, color: "var(--text-dim)" }}>{f.sz} @ ${Number(f.px).toFixed(2)}</span>
+                  {f.dir && (
+                    <span style={{ fontSize: "10px", color: "var(--text-dim)", background: "rgba(255,255,255,0.04)", padding: "1px 4px", borderRadius: 3 }}>
+                      {f.dir}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {f.closedPnl && f.closedPnl !== "0" && (
+                    <span style={{ fontSize: "11px", fontFamily: theme.mono, color: Number(f.closedPnl) >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {Number(f.closedPnl) >= 0 ? "+" : ""}{Number(f.closedPnl).toFixed(2)}
+                    </span>
+                  )}
+                  <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>{new Date(f.time).toLocaleTimeString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {editLot && (
         <EditLotSheet

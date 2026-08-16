@@ -55,7 +55,7 @@ export function useSyncPush() {
             methodName: "__fastdata_kv",
             args: JSON.parse(args),
             gas: "300000000000000",
-            deposit: "0",
+            deposit: "10000000000000000",
           },
         },
       ],

@@ -25,12 +25,19 @@ import { btnIcon, theme, input } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
+type SourceFilter = "all" | "local" | "hyperliquid";
 
 const SORT_LABELS: Record<SortKey, string> = {
   value: "Value",
   pnl: "P&L",
   name: "Name",
   change: "24h",
+};
+
+const SOURCE_LABELS: Record<SourceFilter, string> = {
+  all: "All",
+  local: "Local",
+  hyperliquid: "HL",
 };
 
 function PortfolioView() {
@@ -47,6 +54,7 @@ function PortfolioView() {
   const sortDDRef = useRef<HTMLDivElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [chartPreview, setChartPreview] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -90,7 +98,13 @@ function PortfolioView() {
     for (const hp of hl.positions) {
       if (!localSyms.has(hp.symbol)) merged.push(hp);
     }
-    return [...merged].sort((a, b) => {
+    // Apply source filter
+    const filtered = sourceFilter === "all"
+      ? merged
+      : merged.filter((p) => sourceFilter === "local"
+        ? (p.source !== "hyperliquid")
+        : (p.source === "hyperliquid"));
+    return [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
         case "value": cmp = (b.value ?? 0) - (a.value ?? 0); break;
@@ -100,7 +114,7 @@ function PortfolioView() {
       }
       return sortAsc ? -cmp : cmp;
     });
-  }, [enriched, hl.positions, sortKey, sortAsc]);
+  }, [enriched, hl.positions, sortKey, sortAsc, sourceFilter]);
 
   // Sync: push
   const handlePush = useCallback(async () => {
@@ -261,8 +275,26 @@ function PortfolioView() {
 
       {sorted.length > 0 && <PortfolioSummary positions={sorted} />}
 
-      {/* Sort dropdown + actions */}
+      {/* Sort dropdown + source filter + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 12, marginBottom: 8 }}>
+        {hl.positions.length > 0 && enriched.length > 0 && (
+          <div style={{ display: "flex", gap: 0, borderRadius: "6px", border: "1px solid var(--card-border)", overflow: "hidden" }}>
+            {(Object.keys(SOURCE_LABELS) as SourceFilter[]).map((key) => (
+              <button
+                key={key}
+                onClick={() => setSourceFilter(key)}
+                style={{
+                  padding: "3px 8px", border: "none",
+                  background: sourceFilter === key ? "rgba(249,115,22,0.12)" : "transparent",
+                  color: sourceFilter === key ? "#f97316" : "var(--text-dim)",
+                  fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: theme.mono,
+                }}
+              >
+                {SOURCE_LABELS[key]}
+              </button>
+            ))}
+          </div>
+        )}
         {sorted.length > 1 && (
           <div style={{ position: "relative" }}>
             <button
@@ -331,6 +363,30 @@ function PortfolioView() {
           <SkeletonCard count={3} />
         ) : null}
       </div>
+
+      {/* HL open orders */}
+      {hl.orders.length > 0 && sourceFilter !== "local" && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-dim)", marginBottom: "8px", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f97316", display: "inline-block" }} />
+            Open Orders ({hl.orders.length})
+          </div>
+          <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden" }}>
+            {hl.orders.map((o) => (
+              <div key={o.oid} style={{ padding: "10px 14px", borderTop: "1px solid var(--card-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: "13px", fontWeight: 500 }}>{o.coin}</span>
+                  <span style={{ fontSize: "10px", fontWeight: 600, fontFamily: theme.mono, color: o.side === "B" ? "var(--green)" : "var(--red)", padding: "1px 4px", borderRadius: "3px", background: o.side === "B" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)" }}>
+                    {o.side === "B" ? "BUY" : "SELL"}{o.reduceOnly ? " TP" : ""}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "var(--text-dim)", fontFamily: theme.mono }}>{o.sz} @ ${Number(o.limitPx).toLocaleString()}</span>
+                </div>
+                <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>{new Date(o.timestamp).toLocaleTimeString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {enriched.length === 0 && txs.length === 0 && (
         <div style={{ textAlign: "center", paddingTop: "60px", color: "var(--text-dim)" }}>
@@ -674,6 +730,8 @@ function PositionRoute() {
         txs={txs}
         quote={quotes[decodedSymbol]}
         entryPrice={hl.positions.find(p => p.symbol === decodedSymbol)?.hlMeta?.entryPx}
+        hlMeta={hl.positions.find(p => p.symbol === decodedSymbol)?.hlMeta}
+        recentFills={hl.fills.filter(f => f.coin === decodedSymbol.replace(/^HL:/, ""))}
         onBack={() => navigate(-1)}
         onRemoveLot={removeLot}
         onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}

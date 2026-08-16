@@ -147,14 +147,14 @@ export interface HLUserPosition {
     szi: string;
     entryPx: string;
     margin: number | null;
-    leverage: { type: string; value: number } | undefined;
+    leverage: { type: string; value: number; rawUsd?: string } | undefined;
     liquidationPx: string | null;
     curAvgCost: string;
+    cumFunding?: { allTime: string; sinceOpen: string; sinceChange: string } | null;
     positionValue?: string;
     unrealizedPnl?: string;
     returnOnEquity?: string;
     marginUsed?: string;
-    cumFunding?: string;
   };
   returnPnl: string;
   funding: number;
@@ -226,4 +226,70 @@ export async function getSpotUserState(wallet: string): Promise<HLSpotBalance[]>
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data[0]?.balances ?? [] : [];
+}
+
+export interface HLOpenOrder {
+  coin: string;
+  side: string;          // "B" or "A"
+  limitPx: string;
+  sz: string;
+  oid: number;
+  timestamp: number;
+  origSz: string;
+  reduceOnly?: boolean;
+}
+
+/** Open orders for a wallet (native + venue) */
+export async function getOpenOrders(wallet: string): Promise<HLOpenOrder[]> {
+  const [resN, resV] = await Promise.all([
+    fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "openOrders", user: wallet }),
+    }),
+    fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "openOrders", user: wallet, dex: "xyz" }),
+    }),
+  ]);
+  const native = resN.ok ? await resN.json() : [];
+  const venue = resV.ok ? await resV.json() : [];
+  return [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
+}
+
+export interface HLUserFill {
+  coin: string;
+  side: string;          // "B" or "A"
+  px: string;
+  sz: string;
+  time: number;          // ms
+  dir: string;           // "Open Long", "Close Short", etc.
+  closedPnl: string;
+  fee: string;
+  hash: string;
+  oid: number;
+}
+
+/** Recent fills for a wallet */
+export async function getUserFills(wallet: string, limit = 20): Promise<HLUserFill[]> {
+  const [resN, resV] = await Promise.all([
+    fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "userFills", user: wallet }),
+    }),
+    fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "userFills", user: wallet, dex: "xyz" }),
+    }),
+  ]);
+  const native = resN.ok ? await resN.json() : [];
+  const venue = resV.ok ? await resV.json() : [];
+  const all = [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
+  return all
+    .filter((f: any) => f && f.sz > 0)
+    .sort((a: any, b: any) => (b.time ?? 0) - (a.time ?? 0))
+    .slice(0, limit);
 }

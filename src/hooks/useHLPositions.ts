@@ -5,7 +5,10 @@ import {
   getClearinghouseState,
   getSpotUserState,
   getAllMids,
+  getOpenOrders,
+  getUserFills,
 } from "@/api/hyperliquid";
+import type { HLOpenOrder, HLUserFill } from "@/api/hyperliquid";
 import { labelFromSymbol } from "@/lib/constants";
 import { uid } from "@/lib/format";
 
@@ -75,10 +78,10 @@ function mapHLPositions(
         changePct: null,
         hlMeta: {
           entryPx: entryPrice,
-          margin: pos.margin ?? 0,
+          margin: pos.margin != null ? pos.margin : (pos.leverage?.rawUsd ? Math.abs(parseFloat(String(pos.leverage.rawUsd))) : 0),
           leverage: pos.leverage?.value ?? 1,
           liquidationPx: pos.liquidationPx != null ? parseFloat(String(pos.liquidationPx)) : null,
-          funding: hp.funding ?? 0,
+          funding: pos.cumFunding?.sinceOpen != null ? parseFloat(String(pos.cumFunding.sinceOpen)) : 0,
         },
       } as EnrichedPosition & { hlMeta: HLPositionMeta };
     })
@@ -99,6 +102,8 @@ export function useHLPositions(
   const [positions, setPositions] = useState<EnrichedPosition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orders, setOrders] = useState<HLOpenOrder[]>([]);
+  const [fills, setFills] = useState<HLUserFill[]>([]);
   const [lastFetch, setLastFetch] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const kvPulled = useRef(false);
@@ -144,6 +149,15 @@ export function useHLPositions(
       }
 
       setPositions(mapped);
+
+      // Fetch open orders and recent fills
+      const [ordersRes, fillsRes] = await Promise.all([
+        getOpenOrders(wallet),
+        getUserFills(wallet, 20),
+      ]);
+      setOrders(ordersRes);
+      setFills(fillsRes);
+
       setLastFetch(Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch HL positions");
@@ -156,6 +170,8 @@ export function useHLPositions(
   useEffect(() => {
     if (!wallet) {
       setPositions([]);
+      setOrders([]);
+      setFills([]);
       return;
     }
     fetchPositions();
@@ -192,7 +208,7 @@ export function useHLPositions(
     }
   }, [kvPush, nearAccountId]);
 
-  return { wallet, setWallet, positions, loading, error, lastFetch, refetch: fetchPositions };
+  return { wallet, setWallet, positions, orders, fills, loading, error, lastFetch, refetch: fetchPositions };
 }
 
 /** Pull HL wallet from NEAR KV (standalone, no hook needed) */

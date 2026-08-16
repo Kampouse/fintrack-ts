@@ -7,6 +7,29 @@ interface Props {
 }
 
 async function fetchMiniBars(symbol: string) {
+  // HL perps/spot: use Hyperliquid candleSnapshot API
+  if (symbol.startsWith("HL:")) {
+    try {
+      const coin = symbol.slice(3); // "ZEC" or "xyz:CXMT"
+      const endTime = Date.now();
+      const startTime = endTime - 48 * 60 * 1000; // 48 5-min candles
+      const res = await fetch("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "candleSnapshot",
+          req: { coin, interval: "5m", startTime: Math.floor(startTime / 1000), endTime: Math.floor(endTime / 1000), limit: 48 },
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) return null;
+      return data.map((k: any) => ({
+        time: new Date((k.t ?? k.startTime ?? 0) * 1000).toISOString().substring(0, 19),
+        close: Number(k.c),
+      }));
+    } catch { return null; }
+  }
   // Stocks: use Finnhub candle API via our proxy
   if (!symbol.startsWith("BINANCE:")) {
     try {
