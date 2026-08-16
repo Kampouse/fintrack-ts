@@ -4,7 +4,7 @@ import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, Ref
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { usePositions, positionSymbols } from "@/hooks/usePositions";
-import { useHLPositions } from "@/hooks/useHLPositions";
+import { useHLContext } from "@/contexts/HLContext";
 import { useNearAuth } from "@/contexts/NearAuth";
 import { labelFromSymbol } from "@/lib/constants";
 import type { EnrichedPosition, Transaction } from "@/types";
@@ -76,7 +76,7 @@ function PortfolioView() {
   const { quotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
   const { push: pushToKv } = useSyncPush();
-  const hl = useHLPositions(accountId, pushToKv);
+  const hl = useHLContext();
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
@@ -542,7 +542,7 @@ function TerminalRoute() {
   const symbols = positionSymbols(txs);
   const { quotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
-  const hl = useHLPositions(accountId);
+  const hl = useHLContext();
 
   // Merge HL positions into enriched for terminal
   const allPositions = useMemo(() => {
@@ -744,7 +744,7 @@ function PositionRoute() {
   const decodedSymbol = symbol ? decodeURIComponent(symbol) : "";
   const navigate = useNavigate();
   const { txs, addLot, sellLot, updateLot, removeLot } = useTransactions();
-  const hl = useHLPositions();
+  const hl = useHLContext();
   const positionSymbols = useMemo(() => {
     const all = new Set(txs.map((t) => t.symbol));
     if (decodedSymbol) all.add(decodedSymbol);
