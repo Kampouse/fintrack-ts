@@ -44,7 +44,8 @@ function AnimatedNumber({ value, decimals = 0 }: { value: number; decimals?: num
 export function PortfolioSummary({ positions }: Props) {
   const totalValue = positions.reduce((s, p) => s + (p.value ?? 0), 0);
   const totalCost = positions.reduce((s, p) => s + p.totalCost, 0);
-  const totalPnl = totalValue - totalCost;
+  // Use pos.pnl when available (HL provides unrealizedPnl from API), fall back to value-cost
+  const totalPnl = positions.reduce((s, p) => s + (p.pnl ?? 0), 0);
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
   const totalDayChange = positions.reduce((s, p) => s + (p.dayChange ?? 0), 0);
   const dayChangePct = totalValue > 0 ? (totalDayChange / totalValue) * 100 : null;

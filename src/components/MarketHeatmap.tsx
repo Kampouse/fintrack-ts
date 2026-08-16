@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { getMarketTickers, getTopGainers, getTopLosers, type MarketTicker } from "@/api/binance";
+import { getMetaAndAssetCtxs } from "@/api/hyperliquid";
 
 const MONO = '"SF Mono", "JetBrains Mono", ui-monospace, monospace';
 
@@ -28,7 +29,10 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"heatmap" | "gainers" | "losers" | "volume">("heatmap");
+  const [source, setSource] = useState<"binance" | "hl">("binance");
   const [hovered, setHovered] = useState<string | null>(null);
+  const [hlTickers, setHlTickers] = useState<MarketTicker[]>([]);
+  const [hlLoading, setHlLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -45,21 +49,87 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch HL perp data
+  useEffect(() => {
+    if (source !== "hl") return;
+    setHlLoading(true);
+    getMetaAndAssetCtxs()
+      .then((assets) => {
+        const mids: MarketTicker[] = assets
+          .filter((a) => !a.onlyIsClosed && parseFloat(a.assetCtx.dayNtlVlm) > 0)
+          .map((a) => {
+            const markPx = parseFloat(a.assetCtx.markPx) || 0;
+            const prevDayPx = parseFloat(a.assetCtx.prevDayPx) || 0;
+            const changePercent = prevDayPx > 0 ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
+            return {
+              symbol: `HL:${a.name}`,
+              baseAsset: a.name,
+              quoteAsset: "USD",
+              price: markPx,
+              change: markPx - prevDayPx,
+              changePercent,
+              volume: parseFloat(a.assetCtx.dayNtlVlm),
+              quoteVolume: parseFloat(a.assetCtx.dayNtlVlm),
+              high: markPx, // HL metaAndAssetCtxs doesn't provide 24h high/low
+              low: markPx,
+              open: prevDayPx,
+            } as MarketTicker;
+          })
+          .sort((a, b) => b.quoteVolume - a.quoteVolume)
+          .slice(0, 50);
+        setHlTickers(mids);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setHlLoading(false));
+
+    const interval = setInterval(() => {
+      getMetaAndAssetCtxs().then((assets) => {
+        setHlTickers(assets
+          .filter((a) => !a.onlyIsClosed && parseFloat(a.assetCtx.dayNtlVlm) > 0)
+          .map((a) => {
+            const markPx = parseFloat(a.assetCtx.markPx) || 0;
+            const prevDayPx = parseFloat(a.assetCtx.prevDayPx) || 0;
+            const changePercent = prevDayPx > 0 ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
+            return {
+              symbol: `HL:${a.name}`,
+              baseAsset: a.name,
+              quoteAsset: "USD",
+              price: markPx,
+              change: markPx - prevDayPx,
+              changePercent,
+              volume: parseFloat(a.assetCtx.dayNtlVlm),
+              quoteVolume: parseFloat(a.assetCtx.dayNtlVlm),
+              high: markPx,
+              low: markPx,
+              open: prevDayPx,
+            } as MarketTicker;
+          })
+          .sort((a, b) => b.quoteVolume - a.quoteVolume)
+          .slice(0, 50));
+      });
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [source]);
+
+  const activeTickers = source === "hl" ? hlTickers : tickers;
+  const isActiveLoading = source === "hl" ? hlLoading : loading;
+
   const displayTickers = useMemo(() => {
     switch (view) {
       case "gainers":
-        return getTopGainers(tickers, 20);
+        return getTopGainers(activeTickers, 20);
       case "losers":
-        return getTopLosers(tickers, 20);
+        return getTopLosers(activeTickers, 20);
       case "volume":
-        return [...tickers].sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 20);
+        return [...activeTickers].sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 20);
       default:
         // For heatmap, take top 40 by volume
-        return [...tickers].sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 40);
+        return [...activeTickers].sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 40);
     }
-  }, [tickers, view]);
+  }, [activeTickers, view]);
 
-  if (loading) {
+  if (isActiveLoading) {
     return (
       <div style={{ padding: 20, textAlign: "center", color: "var(--text-dim)" }}>
         Loading market data...
@@ -76,14 +146,62 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
   }
 
   if (view === "heatmap") {
-    return <HeatmapGrid 
-      tickers={displayTickers} 
-      onSelectSymbol={onSelectSymbol}
-      watchlist={watchlist}
-      onToggleWatchlist={onToggleWatchlist}
-      hovered={hovered}
-      setHovered={setHovered}
-    />;
+    return (
+      <div style={{ padding: "12px", height: "100%", overflow: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+        <style>{`::-webkit-scrollbar { display: none }`}</style>
+        {/* Source toggle for heatmap */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 12, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 0, borderRadius: 6, border: "1px solid var(--card-border)", overflow: "hidden" }}>
+            {(["binance", "hl"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                style={{
+                  background: source === s ? "var(--card-active)" : "transparent",
+                  border: "none",
+                  borderRadius: 0,
+                  padding: "6px 10px",
+                  color: source === s ? "var(--lime)" : "var(--text-dim)",
+                  fontSize: 12,
+                  fontFamily: MONO,
+                  cursor: "pointer",
+                  textTransform: "uppercase",
+                }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          {(["heatmap", "gainers", "losers", "volume"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{
+                background: view === v ? "var(--card-active)" : "transparent",
+                border: "1px solid var(--card-border)",
+                borderRadius: 6,
+                padding: "6px 12px",
+                color: view === v ? "var(--lime)" : "var(--text-dim)",
+                fontSize: 12,
+                fontFamily: MONO,
+                cursor: "pointer",
+                textTransform: "capitalize",
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+        <HeatmapGrid 
+          tickers={displayTickers} 
+          onSelectSymbol={onSelectSymbol}
+          watchlist={watchlist}
+          onToggleWatchlist={onToggleWatchlist}
+          hovered={hovered}
+          setHovered={setHovered}
+        />
+      </div>
+    );
   }
 
   return (
@@ -91,6 +209,27 @@ export function MarketHeatmap({ onSelectSymbol, watchlist = [], onToggleWatchlis
       <style>{`::-webkit-scrollbar { display: none }`}</style>
       {/* Tab Bar */}
       <div style={{ display: "flex", gap: 4, marginBottom: 12, marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 0, borderRadius: 6, border: "1px solid var(--card-border)", overflow: "hidden" }}>
+          {(["binance", "hl"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSource(s)}
+              style={{
+                background: source === s ? "var(--card-active)" : "transparent",
+                border: "none",
+                borderRadius: 0,
+                padding: "6px 10px",
+                color: source === s ? "var(--lime)" : "var(--text-dim)",
+                fontSize: 12,
+                fontFamily: MONO,
+                cursor: "pointer",
+                textTransform: "uppercase",
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
         {(["heatmap", "gainers", "losers", "volume"] as const).map((v) => (
           <button
             key={v}

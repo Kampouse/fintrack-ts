@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { EnrichedPosition, HLPositionMeta } from "@/types";
-import type { HLUserPosition } from "@/api/hyperliquid";
+import type { HLUserPosition, HLMarginSummary } from "@/api/hyperliquid";
 import {
   getClearinghouseState,
   getSpotUserState,
@@ -104,6 +104,7 @@ export function useHLPositions(
   const [error, setError] = useState<string | null>(null);
   const [orders, setOrders] = useState<HLOpenOrder[]>([]);
   const [fills, setFills] = useState<HLUserFill[]>([]);
+  const [marginSummary, setMarginSummary] = useState<HLMarginSummary | null>(null);
   const [lastFetch, setLastFetch] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const kvPulled = useRef(false);
@@ -113,10 +114,12 @@ export function useHLPositions(
     setLoading(true);
     setError(null);
     try {
-      const [hlPositions, mids] = await Promise.all([
+      const [hlResult, mids] = await Promise.all([
         getClearinghouseState(wallet),
         getAllMids(),
       ]);
+      const hlPositions = hlResult.positions;
+      setMarginSummary(hlResult.marginSummary);
 
       const spotBalances = await getSpotUserState(wallet);
       const spotCoins = spotBalances.filter((b) => b.total > 0);
@@ -172,6 +175,7 @@ export function useHLPositions(
       setPositions([]);
       setOrders([]);
       setFills([]);
+      setMarginSummary(null);
       return;
     }
     fetchPositions();
@@ -208,7 +212,7 @@ export function useHLPositions(
     }
   }, [kvPush, nearAccountId]);
 
-  return { wallet, setWallet, positions, orders, fills, loading, error, lastFetch, refetch: fetchPositions };
+  return { wallet, setWallet, positions, orders, fills, marginSummary, loading, error, lastFetch, refetch: fetchPositions } as const;
 }
 
 /** Pull HL wallet from NEAR KV (standalone, no hook needed) */

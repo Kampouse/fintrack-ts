@@ -22,6 +22,7 @@ import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { SearchModal } from "@/components/SearchModal";
 import { btnIcon, theme, input } from "@/lib/styles";
+import { fmtUsd } from "@/lib/format";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
@@ -277,7 +278,7 @@ function PortfolioView() {
 
       {/* Sort dropdown + source filter + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 12, marginBottom: 8 }}>
-        {hl.positions.length > 0 && enriched.length > 0 && (
+        {hl.positions.length > 0 && (
           <div style={{ display: "flex", gap: 0, borderRadius: "6px", border: "1px solid var(--card-border)", overflow: "hidden" }}>
             {(Object.keys(SOURCE_LABELS) as SourceFilter[]).map((key) => (
               <button
@@ -348,6 +349,19 @@ function PortfolioView() {
         </div>
       </div>
 
+      {/* HL account stats bar */}
+      {hl.marginSummary && (
+        <div style={{
+          fontSize: 11,
+          fontFamily: theme.mono,
+          color: "var(--text-dim)",
+          marginTop: 6,
+          marginBottom: 2,
+        }}>
+          HL: {fmtUsd(hl.marginSummary.accountValue)} value · {fmtUsd(hl.marginSummary.totalMarginUsed)} margin · {fmtUsd(hl.marginSummary.accountValue - hl.marginSummary.totalMarginUsed)} free
+        </div>
+      )}
+
       {/* Position list */}
       <div style={{ border: "1px solid var(--card-border)", borderRadius: 16, overflow: "hidden", marginTop: "8px" }}>
         {sorted.length > 0 ? (
@@ -388,7 +402,7 @@ function PortfolioView() {
         </div>
       )}
 
-      {enriched.length === 0 && txs.length === 0 && (
+      {enriched.length === 0 && txs.length === 0 && hl.positions.length === 0 && (
         <div style={{ textAlign: "center", paddingTop: "60px", color: "var(--text-dim)" }}>
           <div style={{ fontSize: "16px", marginBottom: "8px" }}>No positions yet</div>
           <div style={{ fontSize: "14px" }}>Tap + to add your first buy</div>

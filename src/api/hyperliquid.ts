@@ -113,6 +113,45 @@ export async function getCandles(
   }));
 }
 
+/** Perp metadata + asset context (mark prices, volume, funding, OI) */
+export interface HLAssetCtx {
+  dayNtlVlm: string;
+  funding: string;
+  openInterest: string;
+  markPx: string;
+  prevDayPx: string;
+  midPx: string | null;
+  oraclePx: string;
+  premium: string;
+  impactPxs: (string | null)[];
+  highLeverageFeeBps: string | null;
+}
+
+export interface HLAssetEntry {
+  name: string;
+  szDecimals: number;
+  onlyIsClosed: boolean;
+  assetCtx: HLAssetCtx;
+}
+
+export async function getMetaAndAssetCtxs(): Promise<HLAssetEntry[]> {
+  const res = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+  });
+  if (!res.ok) return [];
+  const [meta, assetCtxs] = await res.json();
+  const universe: HLPerpInfo[] = meta?.universe ?? [];
+  const ctxs: HLAssetCtx[] = Array.isArray(assetCtxs) ? assetCtxs : [];
+  return universe.map((u, i) => ({
+    name: u.name,
+    szDecimals: u.szDecimals,
+    onlyIsClosed: u.onlyIsClosed ?? false,
+    assetCtx: ctxs[i] ?? {} as HLAssetCtx,
+  }));
+}
+
 /** Search across all HL coins (perps + spot tokens) for a query */
 export async function searchHLCoins(query: string): Promise<HLMid[]> {
   const q = query.toLowerCase();
@@ -177,16 +216,29 @@ export interface HLSpotBalance {
   total: number;
 }
 
+export interface HLMarginSummary {
+  accountValue: number;
+  totalNtlPos: number;
+  totalRawUsd: number;
+  totalMarginUsed: number;
+}
+
+export interface HLClearinghouseResult {
+  positions: HLUserPosition[];
+  marginSummary: HLMarginSummary | null;
+}
+
 /** Open perp positions for a wallet (native + venue perps via dex param) */
-export async function getClearinghouseState(wallet: string): Promise<HLUserPosition[]> {
+export async function getClearinghouseState(wallet: string): Promise<HLClearinghouseResult> {
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "clearinghouseState", user: wallet }),
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { positions: [], marginSummary: null };
   const native = await res.json();
   const nativePositions: HLUserPosition[] = native?.assetPositions ?? [];
+  const nativeMargin: HLMarginSummary | null = native?.marginSummary ?? null;
 
   // Also fetch venue perps (dex="xyz") — e.g. xyz:CXMT, xyz:DRAM
   const resV = await fetch(API, {
@@ -201,7 +253,10 @@ export async function getClearinghouseState(wallet: string): Promise<HLUserPosit
   }
 
   const all = [...nativePositions, ...venuePositions];
-  return all.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0);
+  return {
+    positions: all.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0),
+    marginSummary: nativeMargin,
+  };
 }
 
 /** Trade history for a wallet */
@@ -288,8 +343,9 @@ export async function getUserFills(wallet: string, limit = 20): Promise<HLUserFi
   const native = resN.ok ? await resN.json() : [];
   const venue = resV.ok ? await resV.json() : [];
   const all = [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
+  const seen = new Set<string>();
   return all
-    .filter((f: any) => f && f.sz > 0)
+    .filter((f: any) => f && f.sz > 0 && f.hash && !seen.has(f.hash) && seen.add(f.hash))
     .sort((a: any, b: any) => (b.time ?? 0) - (a.time ?? 0))
     .slice(0, limit);
 }

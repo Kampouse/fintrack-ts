@@ -170,5 +170,42 @@ export function useQuotes(symbols: string[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbolsKey]);
 
+  // HL REST poll: fetch mids for HL: prefixed symbols
+  useEffect(() => {
+    const hlSyms = symbols.filter((s) => s.startsWith("HL:"));
+    if (hlSyms.length === 0) return;
+    const refresh = async () => {
+      try {
+        const mids = await getAllMids();
+        const coins = hlSyms.map((s) => s.replace("HL:", ""));
+        setQuotes((prev) => {
+          const next = { ...prev };
+          for (const coin of coins) {
+            const sym = `HL:${coin}`;
+            const mid = mids[coin];
+            if (mid != null) {
+              next[sym] = {
+                price: mid,
+                change: null,
+                changePct: null,
+                high: null,
+                low: null,
+                open: null,
+                prevClose: null,
+                ts: null,
+              };
+            }
+          }
+          return next;
+        });
+      } catch {}
+    };
+    refresh();
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey]);
+
   return { quotes };
 }
+import { getAllMids } from "@/api/hyperliquid";

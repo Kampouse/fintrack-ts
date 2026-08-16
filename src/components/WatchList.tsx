@@ -8,6 +8,7 @@ import { Sparkline } from "./Sparkline";
 import { TokenIcon } from "./TokenIcon";
 import { useQuotes } from "@/hooks/useQuotes";
 import { searchSymbols, type SearchResult } from "@/api/finnhub";
+import { searchHLCoins } from "@/api/hyperliquid";
 
 const STORAGE_KEY = "fintrack-watchlist";
 
@@ -55,7 +56,7 @@ export function WatchList({ onSelect, onClose, compact }: {
 
   useEffect(() => { saveWatchlist(symbols); }, [symbols]);
 
-  // Debounced Finnhub search
+  // Debounced search: Finnhub + HL coins in parallel
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (filter.trim().length < 2) {
@@ -66,8 +67,20 @@ export function WatchList({ onSelect, onClose, compact }: {
     setSearching(true);
     searchTimer.current = setTimeout(async () => {
       try {
-        const results = await searchSymbols(filter.trim());
-        setSearchResults(results);
+        const [fhResults, hlResults] = await Promise.all([
+          searchSymbols(filter.trim()),
+          searchHLCoins(filter.trim()).catch(() => [] as { coin: string; mid: number }[]),
+        ]);
+        const merged: SearchResult[] = [
+          ...fhResults,
+          ...hlResults.map(h => ({
+            symbol: h.coin,
+            displaySymbol: h.coin.replace("HL:", ""),
+            description: h.mid > 0 ? `$${h.mid.toLocaleString()}` : "Perp",
+            type: "Perp" as const,
+          })),
+        ];
+        setSearchResults(merged);
       } catch {
         setSearchResults([]);
       }
@@ -135,7 +148,7 @@ export function WatchList({ onSelect, onClose, compact }: {
                     <TokenIcon symbol={r.symbol} size={20} />
                     <span style={{ fontSize: 12, fontWeight: 600 }}>{r.displaySymbol}</span>
                     <span style={{ fontSize: 10, color: "var(--text-dim)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.description}</span>
-                    <span style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.type === "Common Stock" ? "S" : r.type === "ETF" ? "E" : "·"}</span>
+                    <span style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.type === "Common Stock" ? "S" : r.type === "ETF" ? "E" : r.type === "Perp" ? "P" : "·"}</span>
                     <Plus size={12} color="var(--lime)" />
                   </button>
                 ))

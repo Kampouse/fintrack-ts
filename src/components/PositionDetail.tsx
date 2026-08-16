@@ -372,7 +372,8 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
         </div>
       )}
 
-      {/* Normal view — metrics left, lots below */}
+      {/* Normal view — metrics left, lots below (hide for HL-only positions) */}
+      {(!hlMeta || lots.length > 0) && (
       <div data-detail-row style={{ display: "flex", gap: "var(--app-hpad, 16px)", marginBottom: 16 }}>
         <div style={{ ...card, flex: 1, padding: '12px 16px' }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
@@ -400,6 +401,7 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
           <BasisChart lots={lots} currentPrice={price} />
         </div>
       </div>
+      )}
       <style>{`@media (max-width: 639px) { [data-detail-row] { flex-direction: column !important; } }`}</style>
       {(!hlMeta || lots.length > 0) && lotsSection}
 
