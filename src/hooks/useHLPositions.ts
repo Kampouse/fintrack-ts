@@ -74,6 +74,7 @@ function mapHLPositions(
         dayChange: null,
         changePct: null,
         hlMeta: {
+          entryPx: entryPrice,
           margin: pos.margin ?? 0,
           leverage: pos.leverage?.value ?? 1,
           liquidationPx: pos.liquidationPx != null ? parseFloat(String(pos.liquidationPx)) : null,

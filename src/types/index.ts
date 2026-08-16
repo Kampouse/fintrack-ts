@@ -50,6 +50,8 @@ export interface EnrichedPosition extends Position {
   pnlPct: number | null;
   dayChange: number | null;
   changePct: number | null;
+  source?: PositionSource;
+  hlMeta?: HLPositionMeta;
 }
 
 /** HL-specific fields attached to positions from clearinghouseState */
@@ -58,4 +60,5 @@ export interface HLPositionMeta {
   leverage: number;
   liquidationPx: number | null;
   funding: number;
+  entryPx?: number;
 }

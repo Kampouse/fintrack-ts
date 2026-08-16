@@ -38,6 +38,7 @@ interface Props {
   symbol: string;
   txs: Transaction[];
   quote: Quote | undefined;
+  entryPrice?: number;
   onBack: () => void;
   onRemoveLot: (id: string) => void;
   onEditLot: (lot: Transaction) => void;
@@ -47,7 +48,7 @@ interface Props {
   onToggleTerminal: () => void;
 }
 
-export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEditLot, onAddLot, onSellLot, terminal, onToggleTerminal }: Props) {
+export function PositionDetail({ symbol, txs, quote, entryPrice, onBack, onRemoveLot, onEditLot, onAddLot, onSellLot, terminal, onToggleTerminal }: Props) {
   const [editLot, setEditLot] = useState<Transaction | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
@@ -122,6 +123,15 @@ export function PositionDetail({ symbol, txs, quote, onBack, onRemoveLot, onEdit
         label: `Avg${i + 1}`,
         color: "#c084fc",
       });
+    });
+  }
+
+  // HL / external entry price overlay
+  if (entryPrice != null && entryPrice > 0) {
+    priceLevels.push({
+      price: entryPrice,
+      label: "Entry",
+      color: "#f97316",
     });
   }
 

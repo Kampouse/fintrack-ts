@@ -650,6 +650,7 @@ function PositionRoute() {
   const decodedSymbol = symbol ? decodeURIComponent(symbol) : "";
   const navigate = useNavigate();
   const { txs, addLot, sellLot, updateLot, removeLot } = useTransactions();
+  const hl = useHLPositions();
   const positionSymbols = useMemo(() => {
     const all = new Set(txs.map((t) => t.symbol));
     if (decodedSymbol) all.add(decodedSymbol);
@@ -672,6 +673,7 @@ function PositionRoute() {
         symbol={decodedSymbol}
         txs={txs}
         quote={quotes[decodedSymbol]}
+        entryPrice={hl.positions.find(p => p.symbol === decodedSymbol)?.hlMeta?.entryPx}
         onBack={() => navigate(-1)}
         onRemoveLot={removeLot}
         onEditLot={(lot) => updateLot(lot.id, { qty: lot.qty, price: lot.price, ts: lot.ts, note: lot.note })}
