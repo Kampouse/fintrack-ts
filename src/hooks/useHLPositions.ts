@@ -30,7 +30,7 @@ function clearLocal() {
 /** Map clearinghouse state → enriched positions */
 function mapHLPositions(
   hlPositions: HLUserPosition[],
-  mids: Record<string, number>,
+  mids: Record<string, string>,
 ): EnrichedPosition[] {
   return hlPositions
     .map((hp) => {
@@ -44,8 +44,8 @@ function mapHLPositions(
       // Use API-provided positionValue and unrealizedPnl when available
       const posValue = parseFloat(String(pos.positionValue ?? 0));
       const rawPnl = parseFloat(String(pos.unrealizedPnl ?? 0));
-      const mid = mids[pos.coin];
-      const price = mid ?? (posValue > 0 ? posValue / absQty : null);
+      const mid = Number(mids[pos.coin]);
+      const price = mid > 0 ? mid : (posValue > 0 ? posValue / absQty : null);
       const value = posValue > 0 ? posValue : (price != null ? price * absQty : null);
       const totalCost = absQty * entryPrice;
       const pnl = rawPnl !== 0 ? rawPnl : (value != null ? (size > 0 ? value - totalCost : totalCost - value) : null);
@@ -127,8 +127,8 @@ export function useHLPositions(
       const mapped = mapHLPositions(hlPositions, mids);
 
       for (const bal of spotCoins) {
-        const mid = mids[bal.coin];
-        if (mid == null || mid === 0) continue;
+        const mid = Number(mids[bal.coin]);
+        if (mid === 0) continue;
         const symbol = `HL:${bal.coin}`;
         if (mapped.some((p) => p.symbol === symbol)) continue;
         mapped.push({

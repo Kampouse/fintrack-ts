@@ -4,6 +4,7 @@ import type { Quote } from "@/types";
 import { ALL_SYMBOLS, tokenIcon, labelFromSymbol } from "@/lib/constants";
 import { getQuote, searchSymbols, type SearchResult } from "@/api/finnhub";
 import { getMarketTickers, type MarketTicker } from "@/api/binance";
+import { getPerpNames, getAllMids } from "@/api/hyperliquid";
 import { TokenIcon } from "./TokenIcon";
 import { card, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
@@ -64,10 +65,21 @@ export function AddSheet({ onClose, onSave, preselect, forceSide }: Props) {
   const [searching, setSearching] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [allTickers, setAllTickers] = useState<MarketTicker[]>([]);
+  const [hlMids, setHlMids] = useState<Record<string, number>>({});
 
-  // Load all crypto tickers on mount
+  // Load all crypto tickers + HL mids on mount
   useEffect(() => {
     getMarketTickers().then(setAllTickers);
+    getPerpNames().then((names) =>
+      getAllMids().then((mids) => {
+        const filtered: Record<string, number> = {};
+        for (const name of names) {
+          const v = Number(mids[name]);
+          if (v > 0) filtered[name] = v;
+        }
+        setHlMids(filtered);
+      })
+    );
   }, []);
 
   // Debounced symbol search (crypto + stocks)
@@ -96,6 +108,19 @@ export function AddSheet({ onClose, onSave, preselect, forceSide }: Props) {
         changePercent: t.changePercent,
       }));
     
+    // Filter HL perps locally
+    const hlResults: HLResult[] = Object.keys(hlMids)
+      .filter((name) => name.toLowerCase().includes(qlc))
+      .slice(0, 5)
+      .map((name) => ({
+        type: "hl" as const,
+        symbol: `HL:${name}`,
+        name,
+        price: hlMids[name],
+      }));
+
+    const localResults = [...cryptoResults, ...hlResults];
+    
     // Search stocks via Finnhub
     searchTimer.current = setTimeout(async () => {
       try {
@@ -108,14 +133,14 @@ export function AddSheet({ onClose, onSave, preselect, forceSide }: Props) {
             name: r.displaySymbol,
             description: r.description,
           }));
-        setSearchResults([...cryptoResults, ...stocks]);
+        setSearchResults([...localResults, ...stocks]);
       } catch {
-        setSearchResults(cryptoResults);
+        setSearchResults(localResults);
       } finally {
         setSearching(false);
       }
     }, 300);
-  }, [allTickers]);
+  }, [allTickers, hlMids]);
 
   // Auto-fetch live price when symbol changes
   useEffect(() => {

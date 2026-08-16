@@ -182,8 +182,8 @@ export function useQuotes(symbols: string[]) {
           const next = { ...prev };
           for (const coin of coins) {
             const sym = `HL:${coin}`;
-            const mid = mids[coin];
-            if (mid != null) {
+            const mid = Number(mids[coin]);
+            if (mid > 0) {
               next[sym] = {
                 price: mid,
                 change: null,

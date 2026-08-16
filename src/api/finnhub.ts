@@ -63,8 +63,8 @@ export async function getQuotes(symbols: string[]): Promise<Record<string, Quote
     const allMids = await getAllMids();
     for (const sym of hlSyms) {
       const coin = sym.replace("HL:", "");
-      const mid = allMids[coin];
-      if (mid != null) {
+      const mid = Number(allMids[coin]);
+      if (mid > 0) {
         results[sym] = {
           price: mid,
           change: null,

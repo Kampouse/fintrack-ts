@@ -39,7 +39,7 @@ export async function getPerpNames(): Promise<string[]> {
 }
 
 /** Bulk mid prices (perps + spot tokens). Does NOT include venue perps like xyz:DRAM. */
-export async function getAllMids(): Promise<Record<string, number>> {
+export async function getAllMids(): Promise<Record<string, string>> {
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -60,7 +60,7 @@ export async function getMid(coin: string): Promise<number | null> {
   const data = await res.json();
   // Perp mid from allMids
   const allMids = await getAllMids();
-  if (allMids[coin] != null) return allMids[coin];
+  if (allMids[coin] != null) return Number(allMids[coin]);
   // Spot pair price (e.g. "PURR/USDC")
   const pairs = data?.[0]?.pairs ?? [];
   const assets = data?.[1] ?? {};
@@ -162,7 +162,7 @@ export async function searchHLCoins(query: string): Promise<HLMid[]> {
   const allMids = await getAllMids();
   for (const name of perpNames) {
     if (name.toLowerCase().includes(q)) {
-      results.push({ coin: `HL:${name}`, mid: allMids[name] ?? 0 });
+      results.push({ coin: `HL:${name}`, mid: Number(allMids[name]) || 0 });
     }
   }
 
@@ -170,7 +170,7 @@ export async function searchHLCoins(query: string): Promise<HLMid[]> {
   const tokens = await getSpotTokens();
   for (const t of tokens) {
     if (t.name.toLowerCase().includes(q) || (t.fullName ?? "").toLowerCase().includes(q)) {
-      const mid = allMids[t.name] ?? 0;
+      const mid = Number(allMids[t.name]) || 0;
       if (mid > 0) results.push({ coin: `HL:${t.name}`, mid });
     }
   }
