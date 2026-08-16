@@ -536,6 +536,22 @@ function TerminalRoute() {
   const symbols = positionSymbols(txs);
   const { quotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
+  const hl = useHLPositions(accountId);
+
+  // Merge HL positions into enriched for terminal
+  const allPositions = useMemo(() => {
+    const merged = [...enriched];
+    const localSyms = new Set(enriched.map((p) => p.symbol));
+    for (const hp of hl.positions) {
+      if (!localSyms.has(hp.symbol)) merged.push(hp);
+    }
+    return merged;
+  }, [enriched, hl.positions]);
+
+  // Update quote symbols to include HL coins
+  const hlSymbols = hl.positions.map((p) => p.symbol);
+  const allSymbols = useMemo(() => [...symbols, ...hlSymbols], [symbols, hlSymbols]);
+  const hlQuotes = useQuotes(allSymbols);
 
   // Terminal toolbar state (lifted from TerminalView)
   const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
@@ -686,7 +702,7 @@ function TerminalRoute() {
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <TerminalView
-          positions={enriched}
+          positions={allPositions}
           onSelect={(symbol) => navigate(`/position/${encodeURIComponent(symbol)}`)}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
