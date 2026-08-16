@@ -144,12 +144,17 @@ export async function searchHLCoins(query: string): Promise<HLMid[]> {
 export interface HLUserPosition {
   position: {
     coin: string;
-    szi: string;           // size as string, positive = long, negative = short
-    entryPx: string;       // entry price as string
+    szi: string;
+    entryPx: string;
     margin: number | null;
     leverage: { type: string; value: number } | undefined;
     liquidationPx: string | null;
     curAvgCost: string;
+    positionValue?: string;
+    unrealizedPnl?: string;
+    returnOnEquity?: string;
+    marginUsed?: string;
+    cumFunding?: string;
   };
   returnPnl: string;
   funding: number;
@@ -172,7 +177,7 @@ export interface HLSpotBalance {
   total: number;
 }
 
-/** Open perp positions for a wallet */
+/** Open perp positions for a wallet (native + venue perps via dex param) */
 export async function getClearinghouseState(wallet: string): Promise<HLUserPosition[]> {
   const res = await fetch(API, {
     method: "POST",
@@ -180,9 +185,23 @@ export async function getClearinghouseState(wallet: string): Promise<HLUserPosit
     body: JSON.stringify({ type: "clearinghouseState", user: wallet }),
   });
   if (!res.ok) return [];
-  const data = await res.json();
-  const positions: HLUserPosition[] = data?.assetPositions ?? [];
-  return positions.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0);
+  const native = await res.json();
+  const nativePositions: HLUserPosition[] = native?.assetPositions ?? [];
+
+  // Also fetch venue perps (dex="xyz") — e.g. xyz:CXMT, xyz:DRAM
+  const resV = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "clearinghouseState", user: wallet, dex: "xyz" }),
+  });
+  let venuePositions: HLUserPosition[] = [];
+  if (resV.ok) {
+    const venue = await resV.json();
+    venuePositions = venue?.assetPositions ?? [];
+  }
+
+  const all = [...nativePositions, ...venuePositions];
+  return all.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0);
 }
 
 /** Trade history for a wallet */

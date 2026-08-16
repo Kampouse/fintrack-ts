@@ -38,11 +38,14 @@ function mapHLPositions(
       const size = parseFloat(String(pos.szi));
       const absQty = Math.abs(size);
       const entryPrice = parseFloat(String(pos.entryPx));
+      // Use API-provided positionValue and unrealizedPnl when available
+      const posValue = parseFloat(String(pos.positionValue ?? 0));
+      const rawPnl = parseFloat(String(pos.unrealizedPnl ?? 0));
       const mid = mids[pos.coin];
-      const price = mid ?? null;
-      const value = price != null ? price * absQty : null;
+      const price = mid ?? (posValue > 0 ? posValue / absQty : null);
+      const value = posValue > 0 ? posValue : (price != null ? price * absQty : null);
       const totalCost = absQty * entryPrice;
-      const pnl = value != null ? (size > 0 ? value - totalCost : totalCost - value) : null;
+      const pnl = rawPnl !== 0 ? rawPnl : (value != null ? (size > 0 ? value - totalCost : totalCost - value) : null);
       const pnlPct = totalCost > 0 && pnl != null ? (pnl / totalCost) * 100 : null;
       const isShort = size < 0;
 
