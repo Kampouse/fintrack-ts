@@ -142,7 +142,7 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
 
   // ─── Terminal mode ───
   if (terminal) {
-    return <KiyotakaTerminal symbol={symbol} onBack={() => onToggleTerminal()} />;
+    return <KiyotakaTerminal symbol={symbol} entryPrice={hlMeta?.entryPx} onBack={() => onToggleTerminal()} />;
   }
 
   // ─── Normal mode (unchanged) ───

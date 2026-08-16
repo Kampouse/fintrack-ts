@@ -11,6 +11,7 @@ import { labelFromSymbol } from "@/lib/constants";
 
 interface KiyotakaTerminalProps {
   symbol: string;
+  entryPrice?: number;
   onBack: () => void;
 }
 
@@ -293,6 +294,35 @@ function nextFinerInterval(current: TfInterval): TfInterval | null {
 }
 
 async function fetchKlines(symbol: string, interval: TfInterval = "1d", startTime?: number, endTime?: number): Promise<ParsedBar[]> {
+  // Hyperliquid branch
+  if (symbol.startsWith("HL:")) {
+    const coin = symbol.replace("HL:", "");
+    const hlInterval = interval as "1m" | "15m" | "1h" | "4h" | "1d";
+    const limit = 500;
+    const tfMs: Record<TfInterval, number> = { "1m": 60_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000 };
+    const start = startTime ?? (Date.now() - limit * tfMs[interval]);
+    try {
+      const { getCandles } = await import("@/api/hyperliquid");
+      const candles = await getCandles(coin, hlInterval, start, endTime, limit);
+      if (!candles.length) return [];
+      return candles.map((k) => {
+        const d = new Date(k.time);
+        const dateStr = interval === "1d"
+          ? d.toISOString().slice(0, 10)
+          : d.toISOString().slice(0, 16).replace("T", " ");
+        const body = Math.abs(k.close - k.open);
+        const range = k.high - k.low;
+        const ratio = range > 0 ? body / range : 0;
+        return {
+          date: dateStr,
+          ohlc: [k.open, k.close, k.low, k.high],
+          volume: k.volume,
+          bodyRatio: +(ratio * 100).toFixed(1),
+        };
+      });
+    } catch { return []; }
+  }
+
   const binanceSymbol = symbol.replace("BINANCE:", "");
   let url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binanceSymbol)}&interval=${interval}&limit=1000`;
   if (startTime) url += `&startTime=${startTime}`;
@@ -607,7 +637,7 @@ const KIYOTAKA_CSS = `
 
 let cssInjected = false;
 
-export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalProps) {
+export default function KiyotakaTerminal({ symbol, entryPrice, onBack }: KiyotakaTerminalProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -659,6 +689,8 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
   const resizeStartHeightsRef = useRef<Record<string, number>>({});
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(false);
+  const entryPriceRef = useRef(entryPrice);
+  entryPriceRef.current = entryPrice;
 
   // ── getBinanceSymbol ──
   const getBinanceSymbol = useCallback(() => {
@@ -854,12 +886,24 @@ export default function KiyotakaTerminal({ symbol, onBack }: KiyotakaTerminalPro
         name: "ZEC", type: "candlestick", data: cData,
         xAxisIndex: gi0, yAxisIndex: gi0,
         itemStyle: { color: GREEN, color0: RED, borderColor: GREEN, borderColor0: RED, borderWidth: 1 },
+        markLine: entryPriceRef.current ? {
+          silent: true, symbol: "none",
+          label: { show: true, formatter: "Entry", position: "insideStartTop", color: "#f97316", fontSize: 11, fontFamily: FONT },
+          lineStyle: { color: "#f97316", width: 1.5, type: "dashed" },
+          data: [{ yAxis: entryPriceRef.current }],
+        } : undefined,
       });
     } else if (s.chartStyle === "line") {
       series.push({
         name: "ZEC", type: "line", data: d.closePrices,
         xAxisIndex: gi0, yAxisIndex: gi0,
         lineStyle: { color: GREEN, width: 2 }, symbol: "none",
+        markLine: entryPriceRef.current ? {
+          silent: true, symbol: "none",
+          label: { show: true, formatter: "Entry", position: "insideStartTop", color: "#f97316", fontSize: 11, fontFamily: FONT },
+          lineStyle: { color: "#f97316", width: 1.5, type: "dashed" },
+          data: [{ yAxis: entryPriceRef.current }],
+        } : undefined,
       });
     } else if (s.chartStyle === "area") {
       series.push({
