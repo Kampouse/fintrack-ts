@@ -74,7 +74,7 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
           <LayoutGrid size={22} />
         </button>
 
-        <div style={{ flex: 1, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+        <div style={{ flex: 1, position: "relative" }}>
           <button
             className="fab-btn"
             onClick={() => onAdd?.()}
@@ -85,8 +85,10 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
               background: "#141414", border: "1.5px solid var(--lime)", cursor: "pointer",
               borderRadius: "50%",
               color: "var(--lime)",
-              marginBottom: 20,
-              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+              position: "absolute",
+              left: "50%", top: -28,
+              transform: "translateX(-50%)",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.5)"
             }}
           >
             <Plus size={26} strokeWidth={2.5} />
