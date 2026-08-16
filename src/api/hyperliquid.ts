@@ -3,16 +3,34 @@
 
 const API = "https://api.hyperliquid.xyz/info";
 
+// ── TTL cache helpers ──
+function ttlCache<T>(ttlMs: number) {
+  let data: T | null = null;
+  let ts = 0;
+  return {
+    get(): T | null { return data !== null && Date.now() - ts < ttlMs ? data : null; },
+    set(v: T) { data = v; ts = Date.now(); },
+    clear() { data = null; ts = 0; },
+  };
+}
+
+// Market data caches (short TTL — prices move)
+const _allMidsCache = ttlCache<Record<string, string>>(10_000);        // 10s
+const _metaAssetCtxsCache = ttlCache<any>(60_000);                      // 60s
+// Spot token metadata changes rarely
+const _spotMetaCache = ttlCache<any>(300_000);                         // 5min
+
 export interface HLMid { coin: string; mid: number }
 export interface HLSpotToken { name: string; fullName?: string; isCanonical: boolean }
 export interface HLPerpInfo { name: string; szDecimals: number; onlyIsClosed?: boolean }
 
-let _spotTokensCache: HLSpotToken[] = [];
 let _perpNamesCache: string[] = [];
+let _perpNamesTs = 0;
 
 /** All spot tokens with metadata */
 export async function getSpotTokens(): Promise<HLSpotToken[]> {
-  if (_spotTokensCache.length > 0) return _spotTokensCache;
+  const cached = _spotMetaCache.get();
+  if (cached) return cached?.[0]?.tokens ?? [];
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -20,33 +38,46 @@ export async function getSpotTokens(): Promise<HLSpotToken[]> {
   });
   if (!res.ok) return [];
   const data = await res.json();
-  _spotTokensCache = data?.[0]?.tokens ?? [];
-  return _spotTokensCache;
+  _spotMetaCache.set(data);
+  return data?.[0]?.tokens ?? [];
 }
 
 /** All perp names */
 export async function getPerpNames(): Promise<string[]> {
-  if (_perpNamesCache.length > 0) return _perpNamesCache;
+  const now = Date.now();
+  if (_perpNamesCache.length > 0 && now - _perpNamesTs < 60_000) return _perpNamesCache;
+  const cached = _metaAssetCtxsCache.get();
+  if (cached) {
+    _perpNamesCache = (cached?.[0]?.universe ?? []).map((u: HLPerpInfo) => u.name);
+    _perpNamesTs = now;
+    return _perpNamesCache;
+  }
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "metaAndAssetCtxs" }),
   });
-  if (!res.ok) return [];
+  if (!res.ok) return _perpNamesCache;
   const data = await res.json();
+  _metaAssetCtxsCache.set(data);
   _perpNamesCache = (data?.[0]?.universe ?? []).map((u: HLPerpInfo) => u.name);
+  _perpNamesTs = now;
   return _perpNamesCache;
 }
 
 /** Bulk mid prices (perps + spot tokens). Does NOT include venue perps like xyz:DRAM. */
 export async function getAllMids(): Promise<Record<string, string>> {
+  const cached = _allMidsCache.get();
+  if (cached) return cached;
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "allMids" }),
   });
   if (!res.ok) return {};
-  return await res.json();
+  const data = await res.json();
+  _allMidsCache.set(data);
+  return data;
 }
 
 /** Real-time mid price for a single coin (works for venue perps like xyz:DRAM) */
@@ -135,13 +166,27 @@ export interface HLAssetEntry {
 }
 
 export async function getMetaAndAssetCtxs(): Promise<HLAssetEntry[]> {
+  const cached = _metaAssetCtxsCache.get();
+  if (cached) {
+    const [meta, assetCtxs] = cached;
+    const universe: HLPerpInfo[] = meta?.universe ?? [];
+    const ctxs: HLAssetCtx[] = Array.isArray(assetCtxs) ? assetCtxs : [];
+    return universe.map((u, i) => ({
+      name: u.name,
+      szDecimals: u.szDecimals,
+      onlyIsClosed: u.onlyIsClosed ?? false,
+      assetCtx: ctxs[i] ?? {} as HLAssetCtx,
+    }));
+  }
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "metaAndAssetCtxs" }),
   });
   if (!res.ok) return [];
-  const [meta, assetCtxs] = await res.json();
+  const data = await res.json();
+  _metaAssetCtxsCache.set(data);
+  const [meta, assetCtxs] = data;
   const universe: HLPerpInfo[] = meta?.universe ?? [];
   const ctxs: HLAssetCtx[] = Array.isArray(assetCtxs) ? assetCtxs : [];
   return universe.map((u, i) => ({

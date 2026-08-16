@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import type { Quote } from "@/types";
 import { getQuotes } from "@/api/finnhub";
 
+import { getAllMids } from "@/api/hyperliquid";
+
 const WS_URL = "wss://fintrack-ws.kj95hgdgnn.workers.dev/ws";
 
 export function useQuotes(symbols: string[]) {
@@ -208,4 +210,3 @@ export function useQuotes(symbols: string[]) {
 
   return { quotes };
 }
-import { getAllMids } from "@/api/hyperliquid";
