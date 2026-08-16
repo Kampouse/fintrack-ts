@@ -387,7 +387,9 @@ function PortfolioView() {
           </div>
           <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden" }}>
             {hl.orders.map((o) => (
-              <div key={o.oid} style={{ padding: "10px 14px", borderTop: "1px solid var(--card-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div key={o.oid}
+                onClick={() => setChartPreview(`HL:${o.coin}`)}
+                style={{ padding: "10px 14px", borderTop: "1px solid var(--card-border)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: "13px", fontWeight: 500 }}>{o.coin}</span>
                   <span style={{ fontSize: "10px", fontWeight: 600, fontFamily: theme.mono, color: o.side === "B" ? "var(--green)" : "var(--red)", padding: "1px 4px", borderRadius: "3px", background: o.side === "B" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)" }}>
