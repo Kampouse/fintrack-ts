@@ -1,4 +1,5 @@
 export type Side = "buy" | "sell";
+export type PositionSource = "local" | "hyperliquid";
 
 export interface Transaction {
   id: string;
@@ -39,6 +40,7 @@ export interface Position {
   avgCost: number;
   lots: Transaction[];
   realized: RealizedSale[];
+  source?: PositionSource;
 }
 
 export interface EnrichedPosition extends Position {
@@ -48,4 +50,12 @@ export interface EnrichedPosition extends Position {
   pnlPct: number | null;
   dayChange: number | null;
   changePct: number | null;
+}
+
+/** HL-specific fields attached to positions from clearinghouseState */
+export interface HLPositionMeta {
+  margin: number;
+  leverage: number;
+  liquidationPx: number | null;
+  funding: number;
 }

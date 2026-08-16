@@ -16,6 +16,7 @@ interface Props {
 export function PositionCard({ pos, onClick, onDelete }: Props) {
   const pnlColor = pos.pnl != null ? (pos.pnl >= 0 ? "var(--green)" : "var(--red)") : "var(--text-dim)";
   const lotCount = pos.lots.length;
+  const isHL = pos.source === "hyperliquid";
 
   const swipe = useSwipe({
     onSwipeLeft: onDelete,
@@ -73,7 +74,12 @@ export function PositionCard({ pos, onClick, onDelete }: Props) {
           <TokenIcon symbol={pos.symbol} size={36} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "16px", fontWeight: 600 }}>{pos.label}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: "16px", fontWeight: 600 }}>{pos.label}</span>
+                {isHL && (
+                  <span style={{ fontSize: "9px", fontWeight: 700, fontFamily: theme.mono, color: "#f97316", padding: "2px 5px", borderRadius: "4px", background: "rgba(249,115,22,0.12)" }}>LIVE</span>
+                )}
+              </div>
               <span style={{
                 fontSize: 11,
                 fontFamily: theme.mono,

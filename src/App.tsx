@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { HashRouter, Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
-import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw, LayoutGrid, BarChart3, Search } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp, LogOut, Wallet, Cloud, CloudOff, Eye, RefreshCw, LayoutGrid, BarChart3, Search, Zap, X } from "lucide-react";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useQuotes } from "@/hooks/useQuotes";
 import { usePositions, positionSymbols } from "@/hooks/usePositions";
+import { useHLPositions } from "@/hooks/useHLPositions";
 import { useNearAuth } from "@/contexts/NearAuth";
 import { labelFromSymbol } from "@/lib/constants";
 import type { EnrichedPosition, Transaction } from "@/types";
@@ -20,7 +21,7 @@ import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet
 import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { SearchModal } from "@/components/SearchModal";
-import { btnIcon, theme } from "@/lib/styles";
+import { btnIcon, theme, input } from "@/lib/styles";
 import { pullPositions, useSyncPush } from "@/lib/kv";
 
 type SortKey = "value" | "pnl" | "name" | "change";
@@ -38,6 +39,8 @@ function PortfolioView() {
   const [addSide, setAddSide] = useState<"buy" | "sell">("buy");
   const [showHelp, setShowHelp] = useState(false);
   const [showSync, setShowSync] = useState(false);
+  const [showHlSettings, setShowHlSettings] = useState(false);
+  const [hlInput, setHlInput] = useState("");
   const [preselectSymbol, setPreselectSymbol] = useState<string | null>(null);
   const [showWatch, setShowWatch] = useState(false);
   const [showSortDD, setShowSortDD] = useState(false);
@@ -62,6 +65,7 @@ function PortfolioView() {
   const symbols = positionSymbols(txs);
   const { quotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
+  const hl = useHLPositions();
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
@@ -78,9 +82,15 @@ function PortfolioView() {
     });
   }, [showSync, isConnected, syncOn, accountId]);
 
-  // Sorted positions
+  // Sorted positions (local + HL merged, deduped by symbol)
   const sorted = useMemo(() => {
-    return [...enriched].sort((a, b) => {
+    const merged = [...enriched];
+    // Add HL positions that don't overlap with local
+    const localSyms = new Set(enriched.map((p) => p.symbol));
+    for (const hp of hl.positions) {
+      if (!localSyms.has(hp.symbol)) merged.push(hp);
+    }
+    return [...merged].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
         case "value": cmp = (b.value ?? 0) - (a.value ?? 0); break;
@@ -90,7 +100,7 @@ function PortfolioView() {
       }
       return sortAsc ? -cmp : cmp;
     });
-  }, [enriched, sortKey, sortAsc]);
+  }, [enriched, hl.positions, sortKey, sortAsc]);
 
   // Sync: push
   const handlePush = useCallback(async () => {
@@ -239,10 +249,17 @@ function PortfolioView() {
           <button onClick={() => setShowSync(true)} style={btnIcon} aria-label="Cloud settings">
             {syncOn && isConnected ? <Cloud size={14} color="#00d4ff" /> : <CloudOff size={14} color="var(--text-dim)" />}
           </button>
+          <button
+            onClick={() => { setHlInput(hl.wallet ?? ""); setShowHlSettings(true); }}
+            style={{ ...btnIcon, background: hl.wallet ? "rgba(249,115,22,0.12)" : "transparent" }}
+            aria-label="Hyperliquid settings"
+          >
+            <Zap size={14} color={hl.wallet ? "#f97316" : "var(--text-dim)"} />
+          </button>
         </div>
       </div>
 
-      {enriched.length > 0 && <PortfolioSummary positions={enriched} />}
+      {sorted.length > 0 && <PortfolioSummary positions={sorted} />}
 
       {/* Sort dropdown + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 12, marginBottom: 8 }}>
@@ -336,6 +353,76 @@ function PortfolioView() {
       <HelpSheet open={showHelp} onClose={() => { setShowHelp(false); }} />
       {showWatch && (
         <WatchListSheet onClose={() => setShowWatch(false)} onSelect={(sym) => { setChartPreview(sym); }} />
+      )}
+      {showHlSettings && (
+        <>
+          <div onClick={() => setShowHlSettings(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 250 }} />
+          <div style={{
+            position: "fixed", bottom: 0, left: 0, right: 0, background: "var(--bg)",
+            borderTop: "1px solid rgba(249,115,22,0.3)", borderRadius: "24px 24px 0 0",
+            padding: "20px 16px 32px", zIndex: 260, maxWidth: "480px", margin: "0 auto",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h2 style={{ fontSize: "18px", fontWeight: 600, color: "#f97316" }}>Hyperliquid</h2>
+              <button onClick={() => setShowHlSettings(false)} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                <X size={20} color="var(--text-dim)" />
+              </button>
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--text-dim)", marginBottom: "12px" }}>
+              Enter your 0x wallet address to track live perp positions.
+              Read-only, no keys needed.
+            </div>
+            <input
+              type="text"
+              placeholder="0x..."
+              value={hlInput}
+              onChange={(e) => setHlInput(e.target.value)}
+              style={input}
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+            <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+              <button
+                onClick={() => {
+                  if (hlInput.trim()) {
+                    hl.setWallet(hlInput.trim());
+                    setShowHlSettings(false);
+                  }
+                }}
+                disabled={!hlInput.trim()}
+                style={{
+                  flex: 1, padding: "12px", borderRadius: "12px", border: "none",
+                  background: hlInput.trim() ? "#f97316" : "var(--card-border)",
+                  color: hlInput.trim() ? "#fff" : "var(--text-dim)",
+                  fontSize: "14px", fontWeight: 600, cursor: hlInput.trim() ? "pointer" : "default",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                {hl.wallet ? "Update" : "Connect"}
+              </button>
+              {hl.wallet && (
+                <button
+                  onClick={() => { hl.setWallet(null); setHlInput(""); setShowHlSettings(false); }}
+                  style={{
+                    padding: "12px 16px", borderRadius: "12px", border: "1px solid var(--card-border)",
+                    background: "transparent", color: "var(--text-dim)", fontSize: "14px",
+                    fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  Disconnect
+                </button>
+              )}
+            </div>
+            {hl.loading && <div style={{ fontSize: "12px", color: "#f97316", marginTop: "12px" }}>Fetching positions...</div>}
+            {hl.error && <div style={{ fontSize: "12px", color: "var(--red)", marginTop: "12px" }}>{hl.error}</div>}
+            {hl.wallet && !hl.loading && (
+              <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "12px", fontFamily: "ui-monospace, monospace" }}>
+                {hl.positions.length} open position{hl.positions.length !== 1 ? "s" : ""}
+                {hl.lastFetch > 0 && ` · fetched ${new Date(hl.lastFetch).toLocaleTimeString()}`}
+              </div>
+            )}
+          </div>
+        </>
       )}
       <SyncSheet
         open={showSync}

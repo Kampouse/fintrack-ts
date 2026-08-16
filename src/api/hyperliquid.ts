@@ -138,3 +138,74 @@ export async function searchHLCoins(query: string): Promise<HLMid[]> {
 
   return results.slice(0, 20);
 }
+
+// ── Account state (read-only, wallet address only, no auth) ──
+
+export interface HLUserPosition {
+  position: {
+    coin: string;
+    size: number;        // positive = long, negative = short
+    entryPx: number;
+    margin: number;
+    leverage: { type: string; value: number };
+    liquidationPx: number | null;
+    curAvgCost: number;
+  };
+  returnPnl: string;      // cumulative P&L string
+  funding: number;       // total funding paid/received
+}
+
+export interface HLUserTrade {
+  coin: string;
+  side: string;          // "B" or "A" (buy/sell)
+  px: number;
+  sz: number;
+  hash: string;
+  time: number;          // ms
+  closedPnl?: number;
+  fee: string;
+}
+
+export interface HLSpotBalance {
+  coin: string;
+  hold: number;
+  total: number;
+}
+
+/** Open perp positions for a wallet */
+export async function getClearinghouseState(wallet: string): Promise<HLUserPosition[]> {
+  const res = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "clearinghouseState", user: wallet }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  // data is [positions...]
+  const positions: HLUserPosition[] = Array.isArray(data) ? data[0] ?? [] : [];
+  return positions.filter((p: HLUserPosition) => p.position && Math.abs(p.position.size) > 0);
+}
+
+/** Trade history for a wallet */
+export async function getUserHistory(wallet: string): Promise<HLUserTrade[]> {
+  const res = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "userHistory", user: wallet }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data.filter((t: HLUserTrade) => t && t.sz > 0) : [];
+}
+
+/** Spot balances for a wallet */
+export async function getSpotUserState(wallet: string): Promise<HLSpotBalance[]> {
+  const res = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "spotUserState", user: wallet }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data[0]?.balances ?? [] : [];
+}
