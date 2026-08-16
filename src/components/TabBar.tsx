@@ -1,4 +1,4 @@
-import { TrendingUp, Wallet, Plus, LayoutGrid } from "lucide-react";
+import { TrendingUp, Wallet, LayoutGrid } from "lucide-react";
 
 type Tab = "portfolio" | "terminal";
 
@@ -15,12 +15,6 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
       <style>{`
         .mobile-nav {
           display: none;
-        }
-        .fab-btn {
-          transition: transform 0.15s ease;
-        }
-        .fab-btn:active {
-          transform: scale(0.9);
         }
         @media (max-width: 767px) {
           .mobile-nav {
@@ -73,27 +67,6 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
         >
           <LayoutGrid size={22} />
         </button>
-
-        <div style={{ flex: 1, position: "relative" }}>
-          <button
-            className="fab-btn"
-            onClick={() => onAdd?.()}
-            aria-label="Add position"
-            style={{
-              width: 56, height: 56,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              background: "#141414", border: "1.5px solid var(--lime)", cursor: "pointer",
-              borderRadius: "50%",
-              color: "var(--lime)",
-              position: "absolute",
-              left: "50%", top: -28,
-              transform: "translateX(-50%)",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.5)"
-            }}
-          >
-            <Plus size={26} strokeWidth={2.5} />
-          </button>
-        </div>
 
         <button
           onClick={() => onWatch?.()}
