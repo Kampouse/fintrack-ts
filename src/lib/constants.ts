@@ -128,7 +128,7 @@ const _labelCache = new Map<string, string>();
 for (const c of ALL_SYMBOLS) _labelCache.set(c.symbol, c.label);
 
 export function labelFromSymbol(symbol: string): string {
-  return _labelCache.get(symbol) ?? symbol.split(":").pop()?.replace("USDT", "") ?? symbol;
+  return _labelCache.get(symbol) ?? symbol.split(":").pop()?.replace(/USDT$/, "")?.replace(/BUSDT$/, "")?.replace(/\//g, "") ?? symbol;
 }
 
 export function tokenIcon(symbol: string, size = 64): string | null {
@@ -138,7 +138,7 @@ export function tokenIcon(symbol: string, size = 64): string | null {
     return `https://s3-symbol-logo.tradingview.com/${asset.cgId}.svg`;
   }
   // Crypto: try TradingView crypto CDN
-  const baseSymbol = symbol.replace("BINANCE:", "").replace("USDT", "");
+  const baseSymbol = symbol.replace("BINANCE:", "").replace("BUSDT", "").replace("USDT", "");
   if (baseSymbol) {
     return `https://s3-symbol-logo.tradingview.com/crypto/XTVC${baseSymbol}.svg`;
   }
@@ -149,5 +149,5 @@ export function tokenIcon(symbol: string, size = 64): string | null {
 }
 
 export function isStock(symbol: string): boolean {
-  return !symbol.startsWith("BINANCE:");
+  return !symbol.startsWith("BINANCE:") && !symbol.startsWith("HL:");
 }

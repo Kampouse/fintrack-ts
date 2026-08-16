@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X, Search } from "lucide-react";
 import { getMarketTickers, type MarketTicker } from "@/api/binance";
 import { searchSymbols, type SearchResult } from "@/api/finnhub";
+import { searchHLCoins, type HLMid } from "@/api/hyperliquid";
 
 interface Props {
   onClose: () => void;
@@ -24,7 +25,14 @@ interface StockResult {
   description: string;
 }
 
-type CombinedResult = CryptoResult | StockResult;
+interface HLResult {
+  type: "hl";
+  symbol: string;
+  name: string;
+  price: number;
+}
+
+type CombinedResult = CryptoResult | StockResult | HLResult;
 
 export function SearchModal({ onClose, onAdd, watchlist = [] }: Props) {
   const [search, setSearch] = useState("");
@@ -66,27 +74,35 @@ export function SearchModal({ onClose, onAdd, watchlist = [] }: Props) {
         changePercent: t.changePercent,
       }));
 
-    // Search stocks via Finnhub
+    // Search stocks via Finnhub + Hyperliquid coins
     const timeout = setTimeout(() => {
-      searchSymbols(search)
-        .then((stockResults) => {
-          const stocks: StockResult[] = (stockResults ?? [])
-            .slice(0, 10)
-            .map((r) => ({
-              type: "stock" as const,
-              symbol: r.symbol,
-              name: r.displaySymbol,
-              description: r.description,
-            }));
-          
-          // Combine results: crypto first, then stocks
-          setResults([...cryptoResults, ...stocks]);
-          setSearching(false);
-        })
-        .catch(() => {
-          setResults(cryptoResults);
-          setSearching(false);
-        });
+      Promise.all([
+        searchSymbols(search).catch(() => []),
+        searchHLCoins(search).catch(() => []),
+      ]).then(([stockResults, hlResults]) => {
+        const stocks: StockResult[] = (stockResults ?? [])
+          .slice(0, 10)
+          .map((r) => ({
+            type: "stock" as const,
+            symbol: r.symbol,
+            name: r.displaySymbol,
+            description: r.description,
+          }));
+
+        const hl: HLResult[] = (hlResults ?? [])
+          .filter((h) => h.mid > 0)
+          .slice(0, 10)
+          .map((h) => ({
+            type: "hl" as const,
+            symbol: h.coin,
+            name: h.coin.replace("HL:", ""),
+            price: h.mid,
+          }));
+
+        // Combine results: crypto first, then HL, then stocks
+        setResults([...cryptoResults, ...hl, ...stocks]);
+        setSearching(false);
+      });
     }, 300);
 
     return () => clearTimeout(timeout);
@@ -227,6 +243,20 @@ export function SearchModal({ onClose, onAdd, watchlist = [] }: Props) {
                         }}
                       >
                         {r.changePercent >= 0 ? "+" : ""}{r.changePercent.toFixed(1)}%
+                      </div>
+                    )}
+                    {r.type === "hl" && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontFamily: "monospace",
+                          color: "var(--cyan)",
+                          background: "var(--cyan-dim, rgba(0,200,200,0.15))",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        HL
                       </div>
                     )}
                     {r.type === "stock" && (

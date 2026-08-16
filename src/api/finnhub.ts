@@ -26,14 +26,16 @@ export async function searchSymbols(q: string): Promise<SearchResult[]> {
 export async function getQuotes(symbols: string[]): Promise<Record<string, Quote>> {
   if (symbols.length === 0) return {};
   
-  // Split: BINANCE:* → client-side fetch (Binance has CORS), rest → our proxy
+  // Split: BINANCE:* → client-side fetch (Binance has CORS), HL:* → Hyperliquid, rest → our proxy
   const binanceSyms = symbols.filter(s => s.startsWith("BINANCE:"));
-  const finnhubSyms = symbols.filter(s => !s.startsWith("BINANCE:"));
+  const hlSyms = symbols.filter(s => s.startsWith("HL:"));
+  const finnhubSyms = symbols.filter(s => !s.startsWith("BINANCE:") && !s.startsWith("HL:"));
   
   const results: Record<string, Quote> = {};
   
   // Binance: client-side (CORS allowed, no key needed)
   if (binanceSyms.length > 0) {
+    // Strip "BINANCE:" prefix for Binance API — preserves BUSDT etc.
     const pairs = binanceSyms.map(s => s.replace("BINANCE:", ""));
     const batchUrl = `https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(pairs)}`;
     const batchRes = await fetch(batchUrl);
@@ -55,7 +57,29 @@ export async function getQuotes(symbols: string[]): Promise<Record<string, Quote
     }
   }
   
-  // Non-Binance: server-side proxy (Finnhub key hidden)
+  // Hyperliquid: client-side (CORS allowed, no key needed)
+  if (hlSyms.length > 0) {
+    const { getAllMids } = await import("@/api/hyperliquid");
+    const allMids = await getAllMids();
+    for (const sym of hlSyms) {
+      const coin = sym.replace("HL:", "");
+      const mid = allMids[coin];
+      if (mid != null) {
+        results[sym] = {
+          price: mid,
+          change: null,
+          changePct: null,
+          high: null,
+          low: null,
+          open: null,
+          prevClose: null,
+          ts: Date.now(),
+        };
+      }
+    }
+  }
+  
+  // Non-Binance/HL: server-side proxy (Finnhub key hidden)
   if (finnhubSyms.length > 0) {
     const params = finnhubSyms.map((s) => `symbol=${encodeURIComponent(s)}`).join("&");
     const res = await fetch(`/api/quotes?${params}`);

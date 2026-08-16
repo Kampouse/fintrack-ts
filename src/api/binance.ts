@@ -39,14 +39,13 @@ export async function getMarketTickers(): Promise<MarketTicker[]> {
     const data = await res.json();
     
     // Filter to USDT pairs only (stable pricing)
-    const usdtPairs = data.filter((t: any) => 
-      t.symbol.endsWith("USDT") && 
-      !t.symbol.includes("UP") && 
-      !t.symbol.includes("DOWN") &&
-      !t.symbol.includes("BEAR") &&
-      !t.symbol.includes("BULL") &&
-      parseFloat(t.quoteVolume) > 100000 // $100k+ daily volume
-    );
+    const usdtPairs = data.filter((t: any) => {
+      const s = t.symbol;
+      // Allow USDT and BUSDT suffixes (Binance uses BUSDT for some tokens)
+      if (!s.endsWith("USDT") && !s.endsWith("BUSDT")) return false;
+      if (s.includes("UP") || s.includes("DOWN") || s.includes("BEAR") || s.includes("BULL")) return false;
+      return parseFloat(t.quoteVolume) > 100000;
+    });
     
     const tickers: MarketTicker[] = usdtPairs.map((t: any) => ({
       symbol: `BINANCE:${t.symbol}`,

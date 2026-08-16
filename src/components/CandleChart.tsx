@@ -120,8 +120,13 @@ interface DrawState {
 }
 
 async function fetchOHLC(symbol: string, days: number) {
-  // Stocks: use Finnhub candle API
-  if (!symbol.startsWith("BINANCE:")) {
+  function msForInterval(i: string): number {
+    const m: Record<string, number> = { "1m": 60000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000, "1w": 604800000 };
+    return m[i] ?? 86400000;
+  }
+
+  // Stocks: use Finnhub candle API (neither BINANCE: nor HL:)
+  if (!symbol.startsWith("BINANCE:") && !symbol.startsWith("HL:")) {
     let resolution = "D";
     let count = 250;
     if (days < 0 || days === 0) { resolution = "5"; count = 60; }
@@ -146,6 +151,34 @@ async function fetchOHLC(symbol: string, days: number) {
         low: k.l,
         close: k.c,
         volume: k.v ?? 0,
+      }));
+    } catch { return []; }
+  }
+
+  // Hyperliquid: venue perps, spot, RWA tokens
+  if (symbol.startsWith("HL:")) {
+    const coin = symbol.replace("HL:", "");
+    let interval: "1m" | "15m" | "1h" | "4h" | "1d" | "1w" = "1d";
+    let limit = 250;
+    if (days < 0) { interval = "1m"; limit = 60; }
+    else if (days === 0) { interval = "15m"; limit = 60; }
+    else if (days <= 1) { interval = "1h"; limit = 72; }
+    else if (days <= 7) { interval = "1h"; limit = 250; }
+    else if (days <= 30) { interval = "1d"; limit = 30; }
+    else { interval = "1d"; limit = 250; }
+
+    try {
+      const { getCandles } = await import("@/api/hyperliquid");
+      const startTime = Date.now() - limit * msForInterval(interval);
+      const candles = await getCandles(coin, interval, startTime, undefined, limit);
+      if (!candles.length) return [];
+      return candles.map((k) => ({
+        time: new Date(k.time).toISOString().substring(0, 19),
+        open: k.open,
+        high: k.high,
+        low: k.low,
+        close: k.close,
+        volume: k.volume,
       }));
     } catch { return []; }
   }
