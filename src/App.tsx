@@ -65,14 +65,14 @@ function PortfolioView() {
   const symbols = positionSymbols(txs);
   const { quotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
-  const hl = useHLPositions();
+  const { push: pushToKv } = useSyncPush();
+  const hl = useHLPositions(accountId, pushToKv);
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [remoteCount, setRemoteCount] = useState<number | null>(null);
-  const { push: pushToKv } = useSyncPush();
 
   // Probe remote count when sync sheet opens
   useEffect(() => {

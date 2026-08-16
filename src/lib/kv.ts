@@ -4,6 +4,7 @@ import { useNearAuth } from "@/contexts/NearAuth";
 const KV_API = "https://kv.main.fastnear.com";
 const KV_CONTRACT = "contextual.near";
 const SYNC_KEY = "positions";
+const HL_WALLET_KEY = "hl_wallet";
 
 /**
  * Read a single key from FastNear KV (public, no auth needed)
@@ -23,6 +24,10 @@ export async function pullPositions(accountId: string): Promise<unknown[] | null
   return kvGet<unknown[]>(accountId, SYNC_KEY);
 }
 
+export async function pullHLWallet(accountId: string): Promise<string | null> {
+  return kvGet<string>(accountId, HL_WALLET_KEY);
+}
+
 /**
  * Push uses the connector's signAndSendTransaction directly
  * (same pattern as near-cli: near call <contract> __fastdata_kv '<args>')
@@ -34,11 +39,11 @@ export async function pullPositions(accountId: string): Promise<unknown[] | null
 export function useSyncPush() {
   const { connector, accountId } = useNearAuth();
 
-  const push = useCallback(async (data: unknown[]): Promise<void> => {
+  const push = useCallback(async (data: unknown, key = SYNC_KEY): Promise<void> => {
     if (!connector || !accountId) throw new Error("Not connected");
 
     const wallet = await connector.wallet();
-    const args = JSON.stringify({ [SYNC_KEY]: data });
+    const args = JSON.stringify({ [key]: data });
     const argsBytes = new TextEncoder().encode(args);
 
     const outcome = await wallet.signAndSendTransaction({
@@ -56,7 +61,6 @@ export function useSyncPush() {
       ],
     } as any);
 
-    // Log outcome so we can verify on-chain
     console.log("[fintrack] sync push outcome:", JSON.stringify(outcome));
   }, [connector, accountId]);
 

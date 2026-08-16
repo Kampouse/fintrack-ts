@@ -9,23 +9,19 @@ import {
 import { labelFromSymbol } from "@/lib/constants";
 import { uid } from "@/lib/format";
 
-const HL_WALLET_KEY = "fintrack_hl_wallet";
+const LS_KEY = "fintrack_hl_wallet";
 const POLL_MS = 60_000;
 
-function loadHLWallet(): string | null {
-  try {
-    return localStorage.getItem(HL_WALLET_KEY);
-  } catch {
-    return null;
-  }
+function loadLocal(): string | null {
+  try { return localStorage.getItem(LS_KEY); } catch { return null; }
 }
 
-function saveHLWallet(addr: string) {
-  localStorage.setItem(HL_WALLET_KEY, addr);
+function saveLocal(addr: string) {
+  localStorage.setItem(LS_KEY, addr);
 }
 
-function clearHLWallet() {
-  localStorage.removeItem(HL_WALLET_KEY);
+function clearLocal() {
+  localStorage.removeItem(LS_KEY);
 }
 
 /** Map clearinghouse state → enriched positions */
@@ -62,7 +58,7 @@ function mapHLPositions(
             side: isShort ? ("sell" as const) : ("buy" as const),
             qty: absQty,
             price: entryPrice,
-            ts: Date.now(), // synthetic timestamp
+            ts: Date.now(),
           },
         ],
         realized: [],
@@ -84,13 +80,23 @@ function mapHLPositions(
     .filter((p): p is NonNullable<typeof p> => p != null);
 }
 
-export function useHLPositions() {
-  const [wallet, setWalletState] = useState<string | null>(loadHLWallet);
+/**
+ * Hook to track Hyperliquid account positions.
+ *
+ * @param nearAccountId - NEAR account for KV sync (pull wallet on connect, push on change). Optional.
+ * @param kvPush - callback to push a value to KV under "hl_wallet" key. Optional.
+ */
+export function useHLPositions(
+  nearAccountId?: string | null,
+  kvPush?: (data: unknown, key: string) => Promise<void>,
+) {
+  const [wallet, setWalletState] = useState<string | null>(loadLocal);
   const [positions, setPositions] = useState<EnrichedPosition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const kvPulled = useRef(false);
 
   const fetchPositions = useCallback(async () => {
     if (!wallet) return;
@@ -102,34 +108,24 @@ export function useHLPositions() {
         getAllMids(),
       ]);
 
-      // Also fetch spot balances with non-zero holdings
       const spotBalances = await getSpotUserState(wallet);
       const spotCoins = spotBalances.filter((b) => b.total > 0);
 
       const mapped = mapHLPositions(hlPositions, mids);
 
-      // Add spot positions for coins with >0 balance
       for (const bal of spotCoins) {
         const mid = mids[bal.coin];
         if (mid == null || mid === 0) continue;
         const symbol = `HL:${bal.coin}`;
-        // Skip if already in perps
         if (mapped.some((p) => p.symbol === symbol)) continue;
         mapped.push({
           symbol,
           label: labelFromSymbol(symbol),
           qty: bal.total,
-          totalCost: 0, // unknown cost basis for spot
+          totalCost: 0,
           avgCost: mid,
           lots: [
-            {
-              id: uid(),
-              symbol,
-              side: "buy" as const,
-              qty: bal.total,
-              price: mid,
-              ts: Date.now(),
-            },
+            { id: uid(), symbol, side: "buy" as const, qty: bal.total, price: mid, ts: Date.now() },
           ],
           realized: [],
           source: "hyperliquid" as const,
@@ -151,7 +147,7 @@ export function useHLPositions() {
     }
   }, [wallet]);
 
-  // Initial fetch + polling
+  // Poll
   useEffect(() => {
     if (!wallet) {
       setPositions([]);
@@ -164,11 +160,45 @@ export function useHLPositions() {
     };
   }, [wallet, fetchPositions]);
 
-  const setWallet = useCallback((addr: string | null) => {
-    if (addr) saveHLWallet(addr);
-    else clearHLWallet();
+  // Pull HL wallet from KV when NEAR connects (once per session)
+  useEffect(() => {
+    if (!nearAccountId || kvPulled.current) return;
+    kvPulled.current = true;
+    pullHLWalletFromKV(nearAccountId).then((remote) => {
+      if (remote && !wallet) {
+        saveLocal(remote);
+        setWalletState(remote);
+      }
+    });
+  }, [nearAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setWallet = useCallback(async (addr: string | null) => {
+    if (addr) saveLocal(addr);
+    else clearLocal();
     setWalletState(addr);
-  }, []);
+
+    // Push to KV if NEAR connected
+    if (kvPush && nearAccountId) {
+      try {
+        await kvPush(addr ?? "", "hl_wallet");
+      } catch (e) {
+        console.warn("[fintrack] KV push hl_wallet failed:", e);
+      }
+    }
+  }, [kvPush, nearAccountId]);
 
   return { wallet, setWallet, positions, loading, error, lastFetch, refetch: fetchPositions };
+}
+
+/** Pull HL wallet from NEAR KV (standalone, no hook needed) */
+async function pullHLWalletFromKV(accountId: string): Promise<string | null> {
+  try {
+    const url = `https://kv.main.fastnear.com/v0/latest/contextual.near/${accountId}/hl_wallet`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.entries?.[0]?.value ?? null;
+  } catch {
+    return null;
+  }
 }
