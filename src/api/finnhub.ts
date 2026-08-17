@@ -1,4 +1,5 @@
 import type { Quote } from "@/types";
+import { getAllMids } from "@/api/hyperliquid";
 
 // Client-side API: calls OUR proxy at /api/quotes, never touches Finnhub directly.
 // The Finnhub key lives only server-side in the Cloudflare Pages secret.
@@ -59,7 +60,6 @@ export async function getQuotes(symbols: string[]): Promise<Record<string, Quote
   
   // Hyperliquid: client-side (CORS allowed, no key needed)
   if (hlSyms.length > 0) {
-    const { getAllMids } = await import("@/api/hyperliquid");
     const allMids = await getAllMids();
     for (const sym of hlSyms) {
       const coin = sym.replace("HL:", "");

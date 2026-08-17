@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import * as echarts from "echarts";
 import { Line as ZrLine, Rect as ZrRect, Text as ZrText, Polyline as ZrPolyline } from "zrender";
+import { getCandles } from "@/api/hyperliquid";
 import { labelFromSymbol } from "@/lib/constants";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -302,7 +303,6 @@ async function fetchKlines(symbol: string, interval: TfInterval = "1d", startTim
     const tfMs: Record<TfInterval, number> = { "1m": 60_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000 };
     const start = startTime ?? (Date.now() - limit * tfMs[interval]);
     try {
-      const { getCandles } = await import("@/api/hyperliquid");
       const candles = await getCandles(coin, hlInterval, start, endTime, limit);
       if (!candles.length) return [];
       return candles.map((k) => {

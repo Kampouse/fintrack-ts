@@ -19,7 +19,6 @@ import { ChartPreviewSheet } from "@/components/ChartPreviewSheet";
 import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet";
 import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
-import { SearchModal } from "@/components/SearchModal";
 import { btnIcon, theme, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
 import { pullPositions, useSyncPush } from "@/lib/kv";
@@ -69,7 +68,12 @@ function PortfolioView() {
   const [chartPreview, setChartPreview] = useState<string | null>(null);
   const [chartPreviewPrice, setChartPreviewPrice] = useState<number | undefined>(undefined);
   const [chartPreviewLabel, setChartPreviewLabel] = useState<string>("Entry");
+  const [toast, setToast] = useState<string | null>(null);
   const navigate = useNavigate();
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -84,10 +88,40 @@ function PortfolioView() {
 
   const { accountId, isConnected, connect, disconnect } = useNearAuth();
   const symbols = positionSymbols(txs);
-  const { quotes } = useQuotes(symbols);
+  const { quotes, refresh: refreshQuotes } = useQuotes(symbols);
   const enriched = usePositions(txs, quotes);
   const { push: pushToKv } = useSyncPush();
   const hl = useHLContext();
+
+  // Pull-to-refresh
+  const [refreshing, setRefreshing] = useState(false);
+  const ptrStartY = useRef(0);
+  const ptrDist = useRef(0);
+  const onPtrTouchStart = useCallback((e: React.TouchEvent) => {
+    const el = e.currentTarget as HTMLElement;
+    if (el.scrollTop <= 0) {
+      ptrStartY.current = e.touches[0].clientY;
+      ptrDist.current = 0;
+    }
+  }, []);
+  const onPtrTouchMove = useCallback((e: React.TouchEvent) => {
+    if (ptrStartY.current === 0) return;
+    const d = e.touches[0].clientY - ptrStartY.current;
+    if (d > 0) {
+      ptrDist.current = Math.min(d * 0.35, 80);
+      (e.currentTarget as HTMLElement).style.transform = `translateY(${ptrDist.current}px)`;
+    }
+  }, []);
+  const onPtrTouchEnd = useCallback(async () => {
+    ptrStartY.current = 0;
+    if (ptrDist.current >= 50) {
+      setRefreshing(true);
+      await Promise.all([refreshQuotes(), hl.refetch()]);
+      setRefreshing(false);
+    }
+    ptrDist.current = 0;
+    (document.querySelector(".portfolio-view") as HTMLElement).style.transform = "";
+  }, [refreshQuotes, hl.refetch]);
 
   // Sync state
   const [syncOn, setSyncOn] = useState(isSyncEnabled);
@@ -180,7 +214,7 @@ function PortfolioView() {
   }, [syncOn]);
 
   return (
-    <div style={{ minHeight: "100vh" }} className="portfolio-view">
+    <div style={{ minHeight: "100vh" }} className="portfolio-view" onTouchStart={onPtrTouchStart} onTouchMove={onPtrTouchMove} onTouchEnd={onPtrTouchEnd}>
       <style>{`
         .portfolio-view { padding: 20px var(--app-hpad, 16px) calc(60px + env(safe-area-inset-bottom, 0px)); }
         @media (max-width: 767px) { .portfolio-view { padding: 20px 12px calc(60px + env(safe-area-inset-bottom, 0px)); } }
@@ -193,7 +227,7 @@ function PortfolioView() {
       <div className="desktop-header">
         <style>{`.desktop-header { display: none; } @media (min-width: 768px) { .desktop-header { display: flex; position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 1px solid var(--card-border); padding: 12px 16px; align-items: center; justify-content: space-between; } }`}</style>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", display: "flex", alignItems: "center", gap: 8 }}>Fintrack{refreshing && <RefreshCw size={14} color="var(--lime)" style={{ animation: "spin 1s linear infinite" }} />}</h1>
           <div style={{ display: "flex", gap: 4 }}>
             <button
               style={{
@@ -435,6 +469,7 @@ function PortfolioView() {
             if (side === "sell") sellLot(sym, qty, price, note);
             else addLot(sym, qty, price, note);
             setShowAdd(false); setPreselectSymbol(null); setAddSide("buy");
+            showToast(`${side === "buy" ? "Added" : "Sold"} ${sym}`);
           }}
           preselect={preselectSymbol}
         />
@@ -818,9 +853,27 @@ function PositionRoute() {
   );
 }
 
+function KeyboardShortcuts() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        // Could open search modal
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [navigate]);
+  return null;
+}
+
 export default function App() {
   return (
     <HashRouter>
+      <KeyboardShortcuts />
+      <style>{`.fade-in { animation: fadeIn 0.15s ease; } @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<PortfolioView />} />

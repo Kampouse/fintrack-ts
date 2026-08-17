@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cgIdFromSymbol } from "@/lib/constants";
 import { fetchVolumeProfile, type VPRow, type Trade, fetchTrades } from "@/api/kiyotaka";
+import { getCandles } from "@/api/hyperliquid";
 
 interface OrderbookLevel { price: number; volume: number; }
 interface OrderbookSnapshot { bids: OrderbookLevel[]; asks: OrderbookLevel[]; }
@@ -31,6 +32,8 @@ interface Props {
   onTrendlineAdd?: (tl: TrendLine) => void;
   onTrendlineUpdate?: (tl: TrendLine) => void;
   onTrendlineRemove?: (id: number) => void;
+  /** Override default timeframe index */
+  tf?: string;
 }
 
 const TF = [
@@ -168,7 +171,6 @@ async function fetchOHLC(symbol: string, days: number) {
     else { interval = "1d"; limit = 250; }
 
     try {
-      const { getCandles } = await import("@/api/hyperliquid");
       const startTime = Date.now() - limit * msForInterval(interval);
       const candles = await getCandles(coin, interval, startTime, undefined, limit);
       if (!candles.length) return [];
@@ -1516,10 +1518,15 @@ export function CandleChart({
   onTrendlineAdd,
   onTrendlineUpdate,
   onTrendlineRemove,
+  tf,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const indicatorCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [days, setDays] = useState(1);
+  const [days, setDays] = useState(() => {
+    if (!tf) return 1;
+    const map: Record<string, number> = { "1m": 0, "15m": 0, "5m": 0, "1h": 0, "4h": 0, "1d": 1, "24h": 1, "1w": 7, "1mth": 30 };
+    return map[tf.toLowerCase()] ?? 1;
+  });
   const [loading, setLoading] = useState(true);
   const hasLoaded = useRef(false);
   const [error, setError] = useState(false);

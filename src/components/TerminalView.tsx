@@ -548,8 +548,10 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
       </div>
 
       {effectiveViewMode === "positions" && sorted.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-dim)" }}>
-          No positions found
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-dim)" }}>
+          <BarChart3 size={32} style={{ marginBottom: 12, opacity: 0.3 }} />
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>No positions yet</div>
+          <div style={{ fontSize: 12 }}>Add a position from the portfolio view to see it here</div>
         </div>
       )}
 
@@ -599,6 +601,9 @@ function MobilePositionCard({ position, onClick }: {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{position.symbol}</span>
+          {position.source === "hyperliquid" && (
+            <span style={{ fontSize: 9, fontWeight: 700, fontFamily: theme.mono, color: "#f97316", padding: "1px 4px", borderRadius: 3, background: "rgba(249,115,22,0.12)" }}>LIVE</span>
+          )}
           <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: theme.mono }}>
             {position.qty != null ? fmtQty(position.qty) : "--"}
           </span>

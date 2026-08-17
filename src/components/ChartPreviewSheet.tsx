@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { X, RefreshCw } from "lucide-react";
+import { getCandles } from "@/api/hyperliquid";
 import { CandleChart } from "./CandleChart";
 import { labelFromSymbol } from "@/lib/constants";
+
+const TF_KEYS = ["1m", "15m", "1h", "4h", "1d"] as const;
+const TF_LABELS = ["1m", "15m", "1h", "4h", "1D"] as const;
 
 interface Props {
   symbol: string;
@@ -13,6 +17,7 @@ interface Props {
 export function ChartPreviewSheet({ symbol, entryPrice, priceLabel = "Entry", onClose }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(() => window.innerWidth >= 680);
+  const [tfIdx, setTfIdx] = useState(4); // default 1D
   const isDesktop = wide;
   useEffect(() => {
     const handler = () => setWide(window.innerWidth >= 680);
@@ -73,6 +78,27 @@ export function ChartPreviewSheet({ symbol, entryPrice, priceLabel = "Entry", on
           borderBottom: "1px solid var(--card-border)",
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, fontFamily: "var(--mono)" }}>{label}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {TF_LABELS.map((l, i) => (
+              <button
+                key={i}
+                onClick={() => setTfIdx(i)}
+                style={{
+                  padding: "3px 8px",
+                  borderRadius: 4,
+                  border: "none",
+                  fontSize: 11,
+                  fontFamily: "var(--mono)",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: tfIdx === i ? "rgba(255,255,255,0.1)" : "transparent",
+                  color: tfIdx === i ? "var(--text)" : "var(--text-dim)",
+                }}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
           <button
             onClick={onClose}
             style={{
@@ -86,7 +112,18 @@ export function ChartPreviewSheet({ symbol, entryPrice, priceLabel = "Entry", on
         </div>
         {/* Chart fills remaining space */}
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-          <CandleChart symbol={symbol} height={600} priceLevels={entryPrice ? [{ price: entryPrice, label: priceLabel, color: "#f97316" }] : []} />
+          <Suspense fallback={
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-dim)", fontSize: 12 }}>
+              <RefreshCw size={16} style={{ animation: "spin 1s linear infinite", marginRight: 8 }} />Loading chart...
+            </div>
+          }>
+          <CandleChart
+            symbol={symbol}
+            height={600}
+            tf={TF_KEYS[tfIdx]}
+            priceLevels={entryPrice ? [{ price: entryPrice, label: priceLabel, color: "#f97316" }] : []}
+          />
+          </Suspense>
         </div>
       </div>
     </div>

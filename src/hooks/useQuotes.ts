@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { Quote } from "@/types";
 import { getQuotes } from "@/api/finnhub";
 
@@ -8,6 +8,8 @@ const WS_URL = "wss://fintrack-ws.kj95hgdgnn.workers.dev/ws";
 
 export function useQuotes(symbols: string[]) {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
+  const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   const symbolsKey = symbols.join(",");
   const wsRef = useRef<WebSocket | null>(null);
   const binanceWsRef = useRef<WebSocket | null>(null);
@@ -40,7 +42,7 @@ export function useQuotes(symbols: string[]) {
     const id = setInterval(refresh, 30000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, refreshKey]);
 
   // WebSocket: live price ticks (Finnhub proxy)
   useEffect(() => {
@@ -104,7 +106,7 @@ export function useQuotes(symbols: string[]) {
       wsRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, refreshKey]);
 
   // Binance WebSocket: live ticker for BINANCE:* symbols
   useEffect(() => {
@@ -170,7 +172,7 @@ export function useQuotes(symbols: string[]) {
       binanceWsRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, refreshKey]);
 
   // HL REST poll: fetch mids for HL: prefixed symbols
   useEffect(() => {
@@ -206,7 +208,7 @@ export function useQuotes(symbols: string[]) {
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, refreshKey]);
 
-  return { quotes };
+  return { quotes, refresh: bumpRefresh };
 }
