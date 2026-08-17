@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import type { EnrichedPosition } from "@/types";
 import { fmtPct, fmtUsd } from "@/lib/format";
 import { card, theme } from "@/lib/styles";
-import { Sparkline } from "./Sparkline";
 import { AllocationDonut } from "./AllocationDonut";
+import { EquityCurve } from "./EquityCurve";
+import { useEquityCurve } from "@/hooks/useEquityCurve";
 
 interface Props {
   positions: EnrichedPosition[];
@@ -72,8 +73,7 @@ export function PortfolioSummary({ positions }: Props) {
       color: ALLOC_COLORS[i % ALLOC_COLORS.length],
     }));
 
-  // Portfolio sparkline — use first position as proxy (aggregated sparkline would need separate data)
-  const topSymbol = positions.length > 0 ? positions[0].symbol : null;
+  const { points: equityPoints } = useEquityCurve(totalValue);
 
   return (
     <div style={card}>
@@ -99,14 +99,10 @@ export function PortfolioSummary({ positions }: Props) {
           </div>
         </div>
 
-        {/* Allocation donut + sparkline */}
+        {/* Allocation donut + equity curve */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <AllocationDonut slices={allocSlices} size={72} />
-          {topSymbol && (
-            <div style={{ opacity: 0.6 }}>
-              <Sparkline symbol={topSymbol} width={64} height={20} />
-            </div>
-          )}
+          <EquityCurve points={equityPoints} width={120} height={28} />
         </div>
       </div>
     </div>
