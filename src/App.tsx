@@ -19,6 +19,7 @@ import { ChartPreviewSheet } from "@/components/ChartPreviewSheet";
 import { SyncSheet, isSyncEnabled, setSyncEnabled } from "@/components/SyncSheet";
 import { TabBar } from "@/components/TabBar";
 import { SkeletonCard } from "@/components/SkeletonCard";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { btnIcon, theme, input } from "@/lib/styles";
 import { fmtUsd } from "@/lib/format";
 import { pullPositions, useSyncPush } from "@/lib/kv";
@@ -611,7 +612,7 @@ function TerminalRoute() {
   const hlQuotes = useQuotes(allSymbols);
 
   // Terminal toolbar state (lifted from TerminalView)
-  const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
+  const [viewMode, setViewMode] = useState<"positions" | "market" | "fills">("positions");
   const [timeframe, setTimeframe] = useState(1);
   const [showSearch, setShowSearch] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>(() => {
@@ -855,22 +856,29 @@ function PositionRoute() {
 
 function KeyboardShortcuts() {
   const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        // Could open search modal
+        // Focus-based: dispatch custom event for search
       }
+      if (e.key === "1") navigate("/");
+      if (e.key === "2") navigate("/terminal");
+      if (e.key === "3") navigate("/markets");
+      if (e.key === "?" || (e.shiftKey && e.key === "/")) navigate("/settings");
+      if (e.key === "Escape" && location.pathname !== "/") navigate("/");
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [navigate]);
+  }, [navigate, location]);
   return null;
 }
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <HashRouter>
       <KeyboardShortcuts />
       <style>{`.fade-in { animation: fadeIn 0.15s ease; } @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
@@ -882,5 +890,6 @@ export default function App() {
         </Routes>
       </Suspense>
     </HashRouter>
+    </ErrorBoundary>
   );
 }

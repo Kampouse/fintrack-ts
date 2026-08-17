@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, SidebarClose, Search } from "lucide-react";
+import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, SidebarClose, Search, Activity } from "lucide-react";
 import { SearchModal } from "./SearchModal";
+import { FillsView } from "./FillsView";
 import type { EnrichedPosition } from "@/types";
 import { CandleChart } from "./CandleChart";
 import { TerminalWidgets } from "./TerminalWidgets";
@@ -12,8 +13,8 @@ import { theme } from "@/lib/styles";
 interface Props {
   positions: EnrichedPosition[];
   onSelect: (symbol: string) => void;
-  viewMode?: "positions" | "market";
-  onViewModeChange?: (mode: "positions" | "market") => void;
+  viewMode?: "positions" | "market" | "fills";
+  onViewModeChange?: (mode: "positions" | "market" | "fills") => void;
   timeframe?: number;
   onTimeframeChange?: (index: number) => void;
   watchlist?: string[];
@@ -37,7 +38,7 @@ interface PanelState {
 
 export function TerminalView({ positions, onSelect, viewMode: externalViewMode, onViewModeChange, timeframe: externalTimeframe, onTimeframeChange, watchlist: externalWatchlist, onToggleWatchlist }: Props) {
   const [timeframe, setTimeframe] = useState(1);
-  const [viewMode, setViewMode] = useState<"positions" | "market">("positions");
+  const [viewMode, setViewMode] = useState<"positions" | "market" | "fills">("positions");
   const [showWidgets, setShowWidgets] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [modalSymbol, setModalSymbol] = useState<string | null>(null);
@@ -104,9 +105,18 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
   } | null>(null);
 
   // Sort by value
+  const [sortBy, setSortBy] = useState<"value" | "pnl" | "symbol">("value");
+  const [filterSource, setFilterSource] = useState<"all" | "local" | "hyperliquid">("all");
   const sorted = useMemo(() => {
-    return [...positions].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-  }, [positions]);
+    let list = positions;
+    if (filterSource === "local") list = list.filter((p) => p.source !== "hyperliquid");
+    if (filterSource === "hyperliquid") list = list.filter((p) => p.source === "hyperliquid");
+    return [...list].sort((a, b) => {
+      if (sortBy === "pnl") return Math.abs(b.pnl ?? 0) - Math.abs(a.pnl ?? 0);
+      if (sortBy === "symbol") return a.label.localeCompare(b.label);
+      return (b.value ?? 0) - (a.value ?? 0);
+    });
+  }, [positions, sortBy, filterSource]);
 
   // Calculate panel grid based on screen size
   const calculateGrid = useCallback(() => {
@@ -369,6 +379,26 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
             <BarChart3 size={14} />
             Market
           </button>
+          <button
+            onClick={() => onViewModeChange ? onViewModeChange("fills") : setViewMode("fills")}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--card-border)",
+              background: effectiveViewMode === "fills" ? "var(--lime-dim)" : "transparent",
+              color: effectiveViewMode === "fills" ? "var(--lime)" : "var(--text-dim)",
+              fontSize: 11,
+              fontWeight: 500,
+              fontFamily: theme.mono,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <Activity size={14} />
+            Fills
+          </button>
         </div>
 
         {/* Timeframe */}
@@ -391,6 +421,33 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
                 }}
               >
                 {tf.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Filter + Sort */}
+        {effectiveViewMode === "positions" && (
+          <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
+            {(["all", "local", "hyperliquid"] as const).map((f) => (
+              <button key={f} onClick={() => setFilterSource(f)} style={{
+                padding: "4px 8px", borderRadius: 4, border: "1px solid var(--card-border)",
+                background: filterSource === f ? "rgba(249,115,22,0.12)" : "transparent",
+                color: filterSource === f ? "#f97316" : "var(--text-dim)",
+                fontSize: 10, fontWeight: 600, fontFamily: theme.mono, cursor: "pointer",
+              }}>
+                {f === "all" ? "ALL" : f === "local" ? "LOCAL" : "HL"}
+              </button>
+            ))}
+            <span style={{ color: "var(--card-border)", margin: "0 2px" }}>|</span>
+            {(["value", "pnl", "symbol"] as const).map((s) => (
+              <button key={s} onClick={() => setSortBy(s)} style={{
+                padding: "4px 8px", borderRadius: 4, border: "1px solid var(--card-border)",
+                background: sortBy === s ? "rgba(255,255,255,0.06)" : "transparent",
+                color: sortBy === s ? "var(--text)" : "var(--text-dim)",
+                fontSize: 10, fontWeight: 600, fontFamily: theme.mono, cursor: "pointer",
+              }}>
+                {s.toUpperCase()}
               </button>
             ))}
           </div>
@@ -543,6 +600,9 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
               watchlist={effectiveWatchlist}
               onToggleWatchlist={toggleWatchlist}
             />
+          )}
+          {effectiveViewMode === "fills" && (
+            <FillsView />
           )}
         </div>
       </div>

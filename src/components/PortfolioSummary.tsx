@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { EnrichedPosition } from "@/types";
 import { fmtPct, fmtUsd } from "@/lib/format";
 import { card, theme } from "@/lib/styles";
 import { AllocationDonut } from "./AllocationDonut";
 import { EquityCurve } from "./EquityCurve";
 import { useEquityCurve } from "@/hooks/useEquityCurve";
+import { Download } from "lucide-react";
 
 interface Props {
   positions: EnrichedPosition[];
@@ -53,6 +54,10 @@ export function PortfolioSummary({ positions }: Props) {
   const pnlColor = totalPnl >= 0 ? "var(--green)" : "var(--red)";
   const dayColor = totalDayChange >= 0 ? "var(--green)" : "var(--red)";
 
+  // Realized P&L from closed lots
+  const totalRealized = positions.reduce((s, p) => s + p.realized.reduce((r, sale) => r + sale.realized, 0), 0);
+  const realizedColor = totalRealized >= 0 ? "var(--green)" : "var(--red)";
+
   // Tick flash
   const [flash, setFlash] = useState<"up" | "down" | null>(null);
   const prevRef = useRef(totalValue);
@@ -75,14 +80,44 @@ export function PortfolioSummary({ positions }: Props) {
 
   const { points: equityPoints } = useEquityCurve(totalValue);
 
+  const exportData = useCallback(() => {
+    const data = positions.map((p) => ({
+      symbol: p.symbol,
+      label: p.label,
+      qty: p.qty,
+      avgCost: p.avgCost,
+      totalCost: p.totalCost,
+      price: p.price,
+      value: p.value,
+      pnl: p.pnl,
+      pnlPct: p.pnlPct,
+      dayChange: p.dayChange,
+      source: p.source,
+      lots: p.lots.map((l) => ({ qty: l.qty, price: l.price, ts: l.ts, side: l.side, note: l.note })),
+      realized: p.realized.map((r) => ({ qty: r.qty, price: r.price, realized: r.realized, realizedPct: r.realizedPct, ts: r.ts })),
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fintrack-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [positions]);
+
   return (
     <div style={card}>
       <div style={{ display: "flex", gap: 16 }}>
         {/* Main value section */}
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "8px" }}>
-            <div style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Portfolio
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: "12px", color: "var(--text-dim)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Portfolio
+              </div>
+              <button onClick={exportData} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", padding: 2, display: "flex" }} title="Export JSON">
+                <Download size={12} />
+              </button>
             </div>
           </div>
           <div className={flash ? `flash-${flash}` : ""} style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", fontFamily: theme.mono }}>
@@ -97,6 +132,14 @@ export function PortfolioSummary({ positions }: Props) {
               {fmtUsd(totalPnl, 0)} {fmtPct(totalPnlPct)}
             </span>
           </div>
+          {totalRealized !== 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
+              <span style={{ fontSize: "11px", color: "var(--text-dim)" }}>Realized</span>
+              <span style={{ fontSize: "11px", fontWeight: 600, fontFamily: theme.mono, color: realizedColor }}>
+                {fmtUsd(totalRealized, 0)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Allocation donut + equity curve */}

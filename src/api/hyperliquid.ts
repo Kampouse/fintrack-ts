@@ -17,6 +17,10 @@ function ttlCache<T>(ttlMs: number) {
 // Market data caches (short TTL — prices move)
 const _allMidsCache = ttlCache<Record<string, string>>(10_000);        // 10s
 const _metaAssetCtxsCache = ttlCache<any>(60_000);                      // 60s
+// User state caches (slightly longer — positions/orders change less frequently)
+const _clearinghouseCache = ttlCache<any>(5_000);                       // 5s
+const _openOrdersCache = ttlCache<any>(5_000);                          // 5s
+const _userFillsCache = ttlCache<any>(5_000);                           // 5s
 // Spot token metadata changes rarely
 const _spotMetaCache = ttlCache<any>(300_000);                         // 5min
 
@@ -275,6 +279,9 @@ export interface HLClearinghouseResult {
 
 /** Open perp positions for a wallet (native + venue perps via dex param) */
 export async function getClearinghouseState(wallet: string): Promise<HLClearinghouseResult> {
+  const cached = _clearinghouseCache.get();
+  if (cached) return cached as HLClearinghouseResult;
+
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -297,11 +304,12 @@ export async function getClearinghouseState(wallet: string): Promise<HLClearingh
     venuePositions = venue?.assetPositions ?? [];
   }
 
-  const all = [...nativePositions, ...venuePositions];
-  return {
-    positions: all.filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0),
+  const result: HLClearinghouseResult = {
+    positions: [...nativePositions, ...venuePositions].filter((p: HLUserPosition) => p.position && Math.abs(parseFloat(String(p.position.szi))) > 0),
     marginSummary: nativeMargin,
   };
+  _clearinghouseCache.set(result);
+  return result;
 }
 
 /** Trade history for a wallet */
@@ -341,6 +349,9 @@ export interface HLOpenOrder {
 
 /** Open orders for a wallet (native + venue) */
 export async function getOpenOrders(wallet: string): Promise<HLOpenOrder[]> {
+  const cached = _openOrdersCache.get();
+  if (cached) return cached as HLOpenOrder[];
+
   const [resN, resV] = await Promise.all([
     fetch(API, {
       method: "POST",
@@ -355,7 +366,9 @@ export async function getOpenOrders(wallet: string): Promise<HLOpenOrder[]> {
   ]);
   const native = resN.ok ? await resN.json() : [];
   const venue = resV.ok ? await resV.json() : [];
-  return [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
+  const result = [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
+  _openOrdersCache.set(result);
+  return result;
 }
 
 export interface HLUserFill {
@@ -373,6 +386,9 @@ export interface HLUserFill {
 
 /** Recent fills for a wallet */
 export async function getUserFills(wallet: string, limit = 20): Promise<HLUserFill[]> {
+  const cached = _userFillsCache.get();
+  if (cached) return cached as HLUserFill[];
+
   const [resN, resV] = await Promise.all([
     fetch(API, {
       method: "POST",
@@ -389,8 +405,10 @@ export async function getUserFills(wallet: string, limit = 20): Promise<HLUserFi
   const venue = resV.ok ? await resV.json() : [];
   const all = [...(Array.isArray(native) ? native : []), ...(Array.isArray(venue) ? venue : [])];
   const seen = new Set<string>();
-  return all
+  const result = all
     .filter((f: any) => f && f.sz > 0 && f.hash && !seen.has(f.hash) && seen.add(f.hash))
     .sort((a: any, b: any) => (b.time ?? 0) - (a.time ?? 0))
     .slice(0, limit);
+  _userFillsCache.set(result);
+  return result;
 }
