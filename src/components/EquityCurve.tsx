@@ -60,15 +60,22 @@ export function EquityCurve({ points, width = 320, height = 64 }: Props) {
     ctx.closePath();
     ctx.fill();
 
-    // Pct change label
-    const pct = lo > 0 ? ((values[values.length - 1] - values[0]) / lo) * 100 : 0;
+    // Dollar label — cumulative realized PnL
+    const total = values[values.length - 1];
+    const label = `${total >= 0 ? "+" : ""}$${total.toFixed(0)}`;
     ctx.font = "600 10px ui-monospace, SFMono-Regular, monospace";
     ctx.fillStyle = color;
     ctx.textAlign = "right";
-    ctx.fillText(`${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`, width - 2, 10);
+    ctx.fillText(label, width - 2, 10);
   }, [points, width, height]);
 
-  if (points.length < 2) return null;
+  if (points.length < 2) {
+    return (
+      <div style={{ width, height, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 10, fontFamily: "ui-monospace, monospace", opacity: 0.4 }}>
+        loading...
+      </div>
+    );
+  }
 
   return (
     <canvas

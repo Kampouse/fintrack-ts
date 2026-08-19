@@ -1,66 +1,69 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getUserFills, type HLUserFill } from "@/api/hyperliquid";
+import { useHLContext } from "@/contexts/HLContext";
 
 const STORAGE_KEY = "fintrack_equity_curve";
-const SAMPLE_INTERVAL = 60_000; // 1 min
-const MAX_POINTS = 1008; // 7 days of minute samples
+const CACHE_TTL = 60_000; // 1 min — don't re-fetch fills constantly
 
 export interface EquityPoint {
   t: number; // timestamp ms
-  v: number; // total value
+  v: number; // cumulative realized PnL
 }
 
-function loadPoints(): EquityPoint[] {
+function loadCached(): { points: EquityPoint[]; ts: number } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as EquityPoint[];
-  } catch { return []; }
+    if (!raw) return { points: [], ts: 0 };
+    return JSON.parse(raw);
+  } catch { return { points: [], ts: 0 };
+  }
 }
 
-function savePoints(pts: EquityPoint[]) {
+function saveCached(points: EquityPoint[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pts.slice(-MAX_POINTS)));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ points, ts: Date.now() }));
   } catch { /* quota */ }
 }
 
-/** Samples totalValue periodically, returns history + current. */
-export function useEquityCurve(totalValue: number) {
-  const [points, setPoints] = useState<EquityPoint[]>(() => loadPoints());
-  const valueRef = useRef(totalValue);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const initialized = useRef(false);
-
-  // Keep valueRef in sync
-  useEffect(() => {
-    valueRef.current = totalValue;
-  }, [totalValue]);
-
-  // Sample periodically
-  useEffect(() => {
-    // Add current value on mount
-    const addSample = () => {
-      const now = Date.now();
-      setPoints((prev) => {
-        const last = prev.length > 0 ? prev[prev.length - 1] : null;
-        // Skip if same value within 30s
-        if (last && last.v === valueRef.current && (now - last.t) < 30_000) return prev;
-        const next = [...prev, { t: now, v: valueRef.current }];
-        savePoints(next);
-        return next;
-      });
-    };
-
-    // Initial sample
-    if (!initialized.current) {
-      initialized.current = true;
-      addSample();
+function buildFromFills(fills: HLUserFill[]): EquityPoint[] {
+  // Sort by time, cumulate closedPnl
+  const sorted = [...fills].sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+  let cum = 0;
+  const pts: EquityPoint[] = [];
+  for (const f of sorted) {
+    const cpnl = parseFloat(f.closedPnl || "0");
+    if (cpnl !== 0) {
+      cum += cpnl;
+      pts.push({ t: (f.time ?? 0) * 1000, v: cum });
     }
+  }
+  return pts;
+}
 
-    timerRef.current = setInterval(addSample, SAMPLE_INTERVAL);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
+/** Builds equity curve from HL fills history. */
+export function useEquityCurve(_totalValue?: number) {
+  const [points, setPoints] = useState<EquityPoint[]>(() => loadCached().points);
+  const hl = useHLContext();
+  const fetching = useRef(false);
+
+  useEffect(() => {
+    const wallet = hl.wallet;
+    if (!wallet || fetching.current) return;
+
+    // Check cache freshness
+    const cached = loadCached();
+    if (cached.points.length > 0 && Date.now() - cached.ts < CACHE_TTL) return;
+
+    fetching.current = true;
+    getUserFills(wallet, 500)
+      .then((fills) => {
+        const pts = buildFromFills(fills);
+        saveCached(pts);
+        setPoints(pts);
+      })
+      .catch(() => {}) // silent — use cached data
+      .finally(() => { fetching.current = false; });
+  }, [hl.wallet]);
 
   const clear = useCallback(() => {
     setPoints([]);

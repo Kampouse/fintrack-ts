@@ -78,7 +78,7 @@ export function PortfolioSummary({ positions }: Props) {
       color: ALLOC_COLORS[i % ALLOC_COLORS.length],
     }));
 
-  const { points: equityPoints } = useEquityCurve(totalValue);
+  const { points: equityPoints } = useEquityCurve();
 
   const exportData = useCallback(() => {
     const data = positions.map((p) => ({
