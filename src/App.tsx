@@ -231,33 +231,13 @@ function PortfolioView() {
           <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", display: "flex", alignItems: "center", gap: 8 }}>Fintrack{refreshing && <RefreshCw size={14} color="var(--lime)" style={{ animation: "spin 1s linear infinite" }} />}</h1>
           <div style={{ display: "flex", gap: 4 }}>
             <button
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--card-border)",
-                background: "var(--lime-dim)",
-                color: "var(--lime)",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: theme.mono,
-                cursor: "pointer",
-              }}
+              className="tbtn tbtn-lg tbtn-lime tbtn-active"
             >
               Portfolio
             </button>
             <button
               onClick={() => navigate("/terminal")}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--card-border)",
-                background: "transparent",
-                color: "var(--text-dim)",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: theme.mono,
-                cursor: "pointer",
-              }}
+              className="tbtn tbtn-lg tbtn-lime"
             >
               Terminal
             </button>
@@ -265,13 +245,13 @@ function PortfolioView() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {isConnected && (
-            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+            <span className="f12 mono" style={{ color: "var(--lime)" }}>
               {accountId}
             </span>
           )}
           <button
             onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
-            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            className="tbtn tbtn-lg tbtn-lime tbtn-active"
           >
             + Add
           </button>
@@ -284,14 +264,14 @@ function PortfolioView() {
         <style>{`.mobile-header { } @media (min-width: 768px) { .mobile-header { display: none; } }`}</style>
         <div>
           <h1 style={{ fontSize: "22px", fontWeight: 700, letterSpacing: "-0.02em" }}>Fintrack</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-dim)", marginTop: "2px" }}>
+          <div className="f11 dim" style={{ marginTop: 2 }}>
             {sorted.length} position{sorted.length !== 1 ? "s" : ""}
           </div>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           {isConnected ? (
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <span style={{ fontSize: "12px", fontFamily: theme.mono, color: "var(--lime)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span className="f12 mono" style={{ color: "var(--lime)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {accountId}
               </span>
               <button onClick={disconnect} style={btnIcon} aria-label="Disconnect">
@@ -326,17 +306,12 @@ function PortfolioView() {
       {/* Sort dropdown + source filter + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: 12, marginBottom: 8 }}>
         {hl.positions.length > 0 && (
-          <div style={{ display: "flex", gap: 0, borderRadius: "6px", border: "1px solid var(--card-border)", overflow: "hidden" }}>
+          <div className="flex" style={{ borderRadius: 6, border: "1px solid var(--card-border)", overflow: "hidden" }}>
             {(Object.keys(SOURCE_LABELS) as SourceFilter[]).map((key) => (
               <button
                 key={key}
                 onClick={() => setSourceFilter(key)}
-                style={{
-                  padding: "3px 8px", border: "none",
-                  background: sourceFilter === key ? "rgba(249,115,22,0.12)" : "transparent",
-                  color: sourceFilter === key ? "#f97316" : "var(--text-dim)",
-                  fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: theme.mono,
-                }}
+                className={`tbtn tbtn-orange ${sourceFilter === key ? "tbtn-active" : ""}`}
               >
                 {SOURCE_LABELS[key]}
               </button>
@@ -347,11 +322,7 @@ function PortfolioView() {
           <div style={{ position: "relative" }}>
             <button
               onClick={() => setShowSortDD(!showSortDD)}
-              style={{
-                padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--card-border)",
-                background: "transparent", color: "var(--lime)", fontSize: "11px", fontWeight: 500,
-                cursor: "pointer", fontFamily: theme.mono, display: "inline-flex", alignItems: "center", gap: 4,
-              }}
+              className="tbtn tbtn-lime tbtn-active flex items-center gap-4"
             >
               {SORT_LABELS[sortKey]} {sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
@@ -369,11 +340,8 @@ function PortfolioView() {
                       else { setSortKey(key); setSortAsc(false); }
                       setShowSortDD(false);
                     }}
-                    style={{
-                      padding: "6px 12px", border: "none", background: "transparent", width: "100%",
-                      textAlign: "left", cursor: "pointer", fontSize: "11px", fontFamily: theme.mono,
-                      color: sortKey === key ? "var(--lime)" : "var(--text)",
-                    }}
+                    style={{ padding: "6px 12px", border: "none", background: "transparent", width: "100%", textAlign: "left" }}
+                  className={`mono f11 semibold pointer ${sortKey === key ? "dim" : ""}`}
                   >
                     {SORT_LABELS[key]} {sortKey === key && (sortAsc ? "↑" : "↓")}
                   </button>
@@ -398,13 +366,7 @@ function PortfolioView() {
 
       {/* HL account stats bar */}
       {hl.marginSummary && (
-        <div style={{
-          fontSize: 11,
-          fontFamily: theme.mono,
-          color: "var(--text-dim)",
-          marginTop: 6,
-          marginBottom: 2,
-        }}>
+        <div className="f11 mono dim" style={{ marginTop: 6, marginBottom: 2 }}>
           HL: {fmtUsd(hl.marginSummary.accountValue)} value · {fmtUsd(hl.marginSummary.totalMarginUsed)} margin · {fmtUsd(hl.marginSummary.accountValue - hl.marginSummary.totalMarginUsed)} free
         </div>
       )}
@@ -428,7 +390,7 @@ function PortfolioView() {
       {/* HL open orders */}
       {hl.orders.length > 0 && sourceFilter !== "local" && (
         <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-dim)", marginBottom: "8px", display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="f12 semibold dim flex items-center gap-6" style={{ marginBottom: 8 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f97316", display: "inline-block" }} />
             Open Orders ({hl.orders.length})
           </div>
@@ -444,12 +406,12 @@ function PortfolioView() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <TokenIcon symbol={`HL:${o.coin}`} size={20} />
                   <span style={{ fontSize: "13px", fontWeight: 500 }}>{o.coin}</span>
-                  <span style={{ fontSize: "10px", fontWeight: 600, fontFamily: theme.mono, color: o.side === "B" ? "var(--green)" : "var(--red)", padding: "1px 4px", borderRadius: "3px", background: o.side === "B" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)" }}>
+                  <span className={`badge ${o.side === "B" ? "pill-green" : "pill-red"}`} style={{ fontSize: 10 }}>
                     {o.side === "B" ? "BUY" : "SELL"}{o.reduceOnly ? " TP" : ""}
                   </span>
-                  <span style={{ fontSize: "11px", color: "var(--text-dim)", fontFamily: theme.mono }}>{o.sz} @ ${Number(o.limitPx).toLocaleString()}</span>
+                  <span className="f11 mono dim">{o.sz} @ ${Number(o.limitPx).toLocaleString()}</span>
                 </div>
-                <span style={{ fontSize: "10px", color: "var(--text-dim)" }}>{new Date(o.timestamp).toLocaleTimeString()}</span>
+                <span className="f11 dim">{new Date(o.timestamp).toLocaleTimeString()}</span>
               </div>
             ))}
           </div>
@@ -457,9 +419,9 @@ function PortfolioView() {
       )}
 
       {enriched.length === 0 && txs.length === 0 && hl.positions.length === 0 && (
-        <div style={{ textAlign: "center", paddingTop: "60px", color: "var(--text-dim)" }}>
-          <div style={{ fontSize: "16px", marginBottom: "8px" }}>No positions yet</div>
-          <div style={{ fontSize: "14px" }}>Tap + to add your first buy</div>
+        <div className="flex flex-col items-center justify-center dim" style={{ paddingTop: 60 }}>
+          <div className="f16" style={{ marginBottom: 8 }}>No positions yet</div>
+          <div className="f14">Tap + to add your first buy</div>
         </div>
       )}
 
@@ -746,13 +708,13 @@ function TerminalRoute() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {isConnected && (
-            <span style={{ fontSize: 12, fontFamily: theme.mono, color: "var(--lime)" }}>
+            <span className="f12 mono" style={{ color: "var(--lime)" }}>
               {accountId}
             </span>
           )}
           <button
             onClick={() => { setPreselectSymbol(null); setShowAdd(true); }}
-            style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--card-border)", background: "var(--lime-dim)", color: "var(--lime)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            className="tbtn tbtn-lg tbtn-lime tbtn-active"
           >
             + Add
           </button>

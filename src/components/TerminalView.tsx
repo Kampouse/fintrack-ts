@@ -408,17 +408,7 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
               <button
                 key={tf.label}
                 onClick={() => onTimeframeChange ? onTimeframeChange(i) : setTimeframe(i)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--card-border)",
-                  background: effectiveTimeframe === i ? "var(--lime-dim)" : "transparent",
-                  color: effectiveTimeframe === i ? "var(--lime)" : "var(--text-dim)",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  fontFamily: theme.mono,
-                  cursor: "pointer",
-                }}
+                className={`tbtn tbtn-lg tbtn-lime ${effectiveTimeframe === i ? "tbtn-active" : ""}`}
               >
                 {tf.label}
               </button>
@@ -430,23 +420,17 @@ export function TerminalView({ positions, onSelect, viewMode: externalViewMode, 
         {effectiveViewMode === "positions" && (
           <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
             {(["all", "local", "hyperliquid"] as const).map((f) => (
-              <button key={f} onClick={() => setFilterSource(f)} style={{
-                padding: "4px 8px", borderRadius: 4, border: "1px solid var(--card-border)",
-                background: filterSource === f ? "rgba(249,115,22,0.12)" : "transparent",
-                color: filterSource === f ? "#f97316" : "var(--text-dim)",
-                fontSize: 10, fontWeight: 600, fontFamily: theme.mono, cursor: "pointer",
-              }}>
+              <button key={f} onClick={() => setFilterSource(f)}
+                className={`tbtn tbtn-orange ${filterSource === f ? "tbtn-active" : ""}`}
+              >
                 {f === "all" ? "ALL" : f === "local" ? "LOCAL" : "HL"}
               </button>
             ))}
             <span style={{ color: "var(--card-border)", margin: "0 2px" }}>|</span>
             {(["value", "pnl", "symbol"] as const).map((s) => (
-              <button key={s} onClick={() => setSortBy(s)} style={{
-                padding: "4px 8px", borderRadius: 4, border: "1px solid var(--card-border)",
-                background: sortBy === s ? "rgba(255,255,255,0.06)" : "transparent",
-                color: sortBy === s ? "var(--text)" : "var(--text-dim)",
-                fontSize: 10, fontWeight: 600, fontFamily: theme.mono, cursor: "pointer",
-              }}>
+              <button key={s} onClick={() => setSortBy(s)}
+                className={`tbtn ${sortBy === s ? "tbtn-active" : ""}`}
+              >
                 {s.toUpperCase()}
               </button>
             ))}

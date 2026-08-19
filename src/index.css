@@ -161,10 +161,110 @@ input[type="datetime-local"] {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
+/* --- Utility classes (replace inline style repetition) --- */
+
+/* Layout */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-1 { flex: 1; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.gap-2 { gap: 2px; }
+.gap-4 { gap: 4px; }
+.gap-6 { gap: 6px; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.min-w-0 { min-width: 0; }
+.shrink-0 { flex-shrink: 0; }
+.relative { position: relative; }
+.absolute { position: absolute; }
+.overflow-hidden { overflow: hidden; }
+.w-full { width: 100%; }
+
+/* Typography */
+.mono { font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; }
+.dim { color: var(--text-dim); }
+.semibold { font-weight: 600; }
+.bold { font-weight: 700; }
+.fw5 { font-weight: 500; }
+.f11 { font-size: 11px; }
+.f12 { font-size: 12px; }
+.f13 { font-size: 13px; }
+.f14 { font-size: 14px; }
+.f16 { font-size: 16px; }
+
+/* P&L pills */
+.pill {
+  font-size: 11px;
+  font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pill-green { background: rgba(74,222,128,0.1); color: var(--green); }
+.pill-red { background: rgba(248,113,113,0.1); color: var(--red); }
+.pill-dim { background: rgba(255,255,255,0.05); color: var(--text-dim); }
+
+/* Badges (HL, LIVE, leverage) */
+.badge {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+.badge-orange { color: #f97316; background: rgba(249,115,22,0.12); }
+.badge-subtle { color: var(--text-dim); background: rgba(255,255,255,0.05); padding: 1px 4px; }
+
+/* Card border top (list dividers) */
+.divider-top { border-top: 1px solid var(--card-border); }
+
+/* Cursor */
+.pointer { cursor: pointer; }
+
 /* Desktop nav at top */
 @media (min-width: 768px) {
   .app-content {
     padding-top: 60px !important;
     padding-bottom: 40px !important;
   }
+}
+
+/* Cursor */
+
+/* Toggle buttons (timeframes, filters, sorts) */
+.tbtn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  cursor: pointer;
+}
+.tbtn-active {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+.tbtn-orange.tbtn-active {
+  background: rgba(249,115,22,0.12);
+  color: #f97316;
+}
+.tbtn-lime.tbtn-active {
+  background: var(--lime-dim);
+  color: var(--lime);
+  border-color: rgba(190,242,100,0.2);
+}
+.tbtn-lg {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
 }

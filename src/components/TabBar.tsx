@@ -1,4 +1,4 @@
-import { TrendingUp, Wallet, LayoutGrid } from "lucide-react";
+import { Wallet, LayoutGrid, TrendingUp } from "lucide-react";
 
 type Tab = "portfolio" | "terminal";
 
@@ -9,7 +9,7 @@ interface Props {
   onWatch?: () => void;
 }
 
-export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
+export function TabBar({ active, onChange, onWatch }: Props) {
   return (
     <div>
       <style>{`
@@ -34,51 +34,41 @@ export function TabBar({ active, onChange, onAdd, onWatch }: Props) {
             justify-content: space-around;
           }
         }
+        .nav-btn {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--text-dim);
+          padding-bottom: 4px;
+          transition: color 0.15s ease;
+        }
+        .nav-btn.active { color: var(--lime); }
       `}</style>
 
-      {/* Bottom navigation - mobile & desktop */}
       <div className="mobile-nav">
         <button
+          className={`nav-btn ${active === "portfolio" ? "active" : ""}`}
           onClick={() => onChange("portfolio")}
           aria-label="Portfolio"
-          style={{
-            flex: 1,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            background: "none", border: "none", cursor: "pointer",
-            color: active === "portfolio" ? "var(--lime)" : "var(--text-dim)",
-            paddingBottom: 4,
-            transition: "color 0.15s ease",
-          }}
         >
           <Wallet size={22} />
         </button>
-
         <button
+          className={`nav-btn ${active === "terminal" ? "active" : ""}`}
           onClick={() => onChange("terminal")}
           aria-label="Terminal"
-          style={{
-            flex: 1,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            background: "none", border: "none", cursor: "pointer",
-            color: active === "terminal" ? "var(--lime)" : "var(--text-dim)",
-            paddingBottom: 4,
-            transition: "color 0.15s ease",
-          }}
         >
           <LayoutGrid size={22} />
         </button>
-
         <button
+          className="nav-btn"
           onClick={() => onWatch?.()}
           aria-label="Markets"
-          style={{
-            flex: 1,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            background: "none", border: "none", cursor: "pointer",
-            color: "var(--text-dim)",
-            paddingBottom: 4,
-            transition: "color 0.15s ease",
-          }}
         >
           <TrendingUp size={22} />
         </button>
