@@ -3,7 +3,7 @@ import { getUserFills, type HLUserFill } from "@/api/hyperliquid";
 import { useHLContext } from "@/contexts/HLContext";
 
 const STORAGE_KEY = "fintrack_equity_curve";
-const CACHE_TTL = 60_000; // 1 min — don't re-fetch fills constantly
+const CACHE_TTL = 60_000; // 1 min
 
 export interface EquityPoint {
   t: number; // timestamp ms
@@ -14,9 +14,9 @@ function loadCached(): { points: EquityPoint[]; ts: number } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { points: [], ts: 0 };
-    return JSON.parse(raw);
-  } catch { return { points: [], ts: 0 };
-  }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.points) ? parsed : { points: [], ts: 0 };
+  } catch { return { points: [], ts: 0 }; }
 }
 
 function saveCached(points: EquityPoint[]) {
@@ -26,7 +26,7 @@ function saveCached(points: EquityPoint[]) {
 }
 
 function buildFromFills(fills: HLUserFill[]): EquityPoint[] {
-  // Sort by time, cumulate closedPnl
+  if (!Array.isArray(fills)) return [];
   const sorted = [...fills].sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
   let cum = 0;
   const pts: EquityPoint[] = [];
@@ -34,7 +34,7 @@ function buildFromFills(fills: HLUserFill[]): EquityPoint[] {
     const cpnl = parseFloat(f.closedPnl || "0");
     if (cpnl !== 0) {
       cum += cpnl;
-      pts.push({ t: (f.time ?? 0) * 1000, v: cum });
+      pts.push({ t: f.time ?? 0, v: cum });
     }
   }
   return pts;
@@ -50,7 +50,6 @@ export function useEquityCurve(_totalValue?: number) {
     const wallet = hl.wallet;
     if (!wallet || fetching.current) return;
 
-    // Check cache freshness
     const cached = loadCached();
     if (cached.points.length > 0 && Date.now() - cached.ts < CACHE_TTL) return;
 
@@ -61,7 +60,7 @@ export function useEquityCurve(_totalValue?: number) {
         saveCached(pts);
         setPoints(pts);
       })
-      .catch(() => {}) // silent — use cached data
+      .catch(() => {})
       .finally(() => { fetching.current = false; });
   }, [hl.wallet]);
 
