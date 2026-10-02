@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>VelaChart harness</title>
+<style>
+  html, body { margin: 0; background: #0A0A0F; }
+  #chart { width: 900px; height: 500px; }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<script type="module">
+  import React from "react";
+  import { createRoot } from "react-dom/client";
+  import { VelaChart } from "/src/components/VelaChart.tsx";
+
+  const mids = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "allMids" }),
+  }).then((r) => r.json());
+  const mid = parseFloat(mids.ETH);
+
+  createRoot(document.getElementById("chart")).render(
+    React.createElement(VelaChart, {
+      symbol: "ETH",
+      height: 500,
+      tf: "1h",
+      priceLevels: [
+        { price: mid, label: "Entry", color: "#f97316" },
+        { price: mid * 0.92, label: "Liq", color: "#ef4444" },
+      ],
+    })
+  );
+  window.__VELA_HARNESS__ = true;
+</script>
+</body>
+</html>

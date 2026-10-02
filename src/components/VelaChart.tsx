@@ -18,6 +18,8 @@ export interface PriceLevel {
   price: number;
   label: string;
   color: string;
+  /** locked levels (entry/liq) can't be dragged; unlocked ones report onLevelMove */
+  locked?: boolean;
 }
 
 export interface TrendLine {
@@ -42,6 +44,16 @@ interface Props {
   onTrendlineRemove?: (id: number) => void;
   /** Override default timeframe ("1m" | "15m" | "1h" | "4h" | "1d" | "1w") */
   tf?: string;
+  /** allow unlocked priceLevels to be dragged + deleted on-chart */
+  interactive?: boolean;
+  /** an unlocked level was dragged to a new price (matched by label) */
+  onLevelMove?: (label: string, price: number) => void;
+  /** an unlocked level was deleted on-chart (Del key) */
+  onLevelRemove?: (label: string) => void;
+  /** armed: next chart click resolves to a price (click-to-place TP/SL) */
+  placeLevel?: { label: string } | null;
+  /** fired with the clicked price while placeLevel is armed */
+  onPlaceLevel?: (price: number) => void;
 }
 
 const TF_MS: Record<string, number> = {
@@ -135,6 +147,11 @@ export function VelaChart({
   onTrendlineUpdate,
   onTrendlineRemove,
   tf,
+  interactive = false,
+  onLevelMove,
+  onLevelRemove,
+  placeLevel = null,
+  onPlaceLevel,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
@@ -149,10 +166,20 @@ export function VelaChart({
   const tlIdMap = useRef<Map<string, number>>(new Map()); // vela id -> fintrack id
   const tlIdRev = useRef<Map<number, string>>(new Map()); // fintrack id -> vela id
 
-  const cbRef = useRef({ onTrendlineAdd, onTrendlineUpdate, onTrendlineRemove });
-  cbRef.current = { onTrendlineAdd, onTrendlineUpdate, onTrendlineRemove };
+  const cbRef = useRef({ onTrendlineAdd, onTrendlineUpdate, onTrendlineRemove, onLevelMove, onLevelRemove, onPlaceLevel });
+  cbRef.current = { onTrendlineAdd, onTrendlineUpdate, onTrendlineRemove, onLevelMove, onLevelRemove, onPlaceLevel };
   const priceLevelsRef = useRef(priceLevels);
   priceLevelsRef.current = priceLevels;
+  const interactiveRef = useRef(interactive);
+  interactiveRef.current = interactive;
+  const placeLevelRef = useRef(placeLevel);
+  placeLevelRef.current = placeLevel;
+  // vela drawing id → level label (kept fresh by mount + sync effect)
+  const levelLabelById = useRef<Map<string, string>>(new Map());
+  // true while WE wipe/re-add level drawings, so drawings.onChange ignores our own churn
+  const syncingLevels = useRef(false);
+  // last drag price reported per label (dedupe drag ticks)
+  const lastMove = useRef<Map<string, number>>(new Map());
 
   // --- create chart once per symbol+tf ------------------------------------
   const tfKey = resolveTf(tf).interval;
@@ -163,10 +190,13 @@ export function VelaChart({
     setError(false);
     managedIds.current.clear();
     levelVelaIds.current = [];
+    levelLabelById.current.clear();
+    lastMove.current.clear();
     tlIdMap.current.clear();
     tlIdRev.current.clear();
 
     (async () => {
+      try {
       const { interval, ms } = resolveTf(tf);
       const now = Date.now();
       // Scale bar count to host width so narrow columns don't render sub-pixel candles
@@ -210,12 +240,16 @@ export function VelaChart({
       const addLevels = () => {
         const ids: string[] = [];
         for (const lvl of priceLevelsRef.current) {
+          const locked = lvl.locked !== false;
           const d = chart.drawings.add("hline", {
             anchors: [{ time: Date.now(), price: lvl.price }],
             style: { lineColor: lvl.color, lineWidth: 1, lineStyle: "dashed" },
             text: { value: lvl.label, size: "small", hAlign: "right", vAlign: "bottom" },
           });
-          if (d) { ids.push(d.id); managedIds.current.add(d.id); }
+          if (d) {
+            if (locked) chart.drawings.lock(d.id, true);
+            ids.push(d.id); managedIds.current.add(d.id); levelLabelById.current.set(d.id, lvl.label);
+          }
         }
         levelVelaIds.current = ids;
       };
@@ -257,36 +291,134 @@ export function VelaChart({
         tlIdRev.current.delete(fid);
         cbRef.current.onTrendlineRemove?.(fid);
       });
+
+      // --- interactive price levels (drag / delete / click-to-place) ---------
+
+      // unlocked level dragged → report new price upward
+      chart.on("drawing:edited", (e: { id: string }) => {
+        if (!interactiveRef.current) return;
+        if (!levelVelaIds.current.includes(e.id)) return; // stale id from an older generation
+        const label = levelLabelById.current.get(e.id);
+        if (!label) return; // not one of our levels
+        const lvl = (priceLevelsRef.current as any[]).find(
+          (p) => p.locked === false && p.label === label,
+        );
+        if (!lvl) return; // locked levels never report
+        const all = chart.drawings.all() as any[];
+        const d = all.find((x) => x.id === e.id);
+        const price = d?.anchors?.[0]?.price;
+        if (typeof price !== "number") return;
+        if (lastMove.current.get(label) === price) return;
+        lastMove.current.set(label, price);
+        cbRef.current.onLevelMove?.(label, price);
+      });
+
+      // our level deleted on-chart (Del key) → report upward
+      chart.on("drawing:removed", (e: { id: string }) => {
+        if (!interactiveRef.current) return;
+        // async removed-events from our own sync-effect wipes carry OLD generation
+        // ids — only report deletions of CURRENT level drawings
+        if (!levelVelaIds.current.includes(e.id)) return;
+        const label = levelLabelById.current.get(e.id);
+        if (!label) return;
+        levelVelaIds.current = levelVelaIds.current.filter((x) => x !== e.id);
+        levelLabelById.current.delete(e.id);
+        managedIds.current.delete(e.id);
+        const lvl = (priceLevelsRef.current as any[]).find(
+          (p) => p.locked === false && p.label === label,
+        );
+        if (lvl) cbRef.current.onLevelRemove?.(label);
+      });
+
+      // armed placement: Vela's native hline tool does pixel→price for us
+      chart.on("drawing:created", (e: { id: string }) => {
+        const armed = placeLevelRef.current;
+        if (!armed) return; // our own sync-effect adds land here too — ignore
+        // anchors may not be resolvable synchronously inside the create event —
+        // read the committed drawing on the next tick, then swap in the labeled line
+        setTimeout(() => {
+          const all = chart.drawings.all() as any[];
+          const d = all.find((x) => x.id === e.id);
+          const price = d?.anchors?.[0]?.price;
+          try { chart.drawings.remove(e.id); } catch { /* gone */ }
+          managedIds.current.delete(e.id);
+          if (typeof price === "number") cbRef.current.onPlaceLevel?.(price);
+        }, 60);
+      });
+      } catch (err) {
+        console.error("VelaChart mount failed:", err);
+      }
     })();
 
     return () => {
       dead = true;
       try { chartRef.current?.destroy(); } catch { /* already gone */ }
       chartRef.current = null;
+      // debug hooks must not outlive the chart (stale-hook false positives)
+      delete (window as any).__velaChart;
     };
     // symbol/tf changes rebuild the chart; levels/trendlines sync via effects below
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, tfKey]);
 
-  // priceLevels → wipe + re-add level drawings (cheap, deterministic)
-  const levelKeys = priceLevels.map(p => `${p.price}|${p.label}|${p.color}`).join(";");
+  // armed placement → arm Vela's native hline tool (one-shot); cleared → disarm
+  const armKey = placeLevel?.label ?? null;
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    for (const id of levelVelaIds.current) {
-      try { chart.drawings.remove(id); } catch { /* gone */ }
-      managedIds.current.delete(id);
+    try { chart.drawings.setTool(armKey ? "hline" : null); } catch { /* not ready yet */ }
+  }, [armKey, loading]);
+
+  // priceLevels → diff-sync level drawings (no mass wipe; keeps ids stable)
+  const levelKeys = priceLevels.map(p => `${p.price}|${p.label}|${p.color}|${p.locked !== false}`).join(";");
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    syncingLevels.current = true;
+    try {
+      const want = new Map(priceLevels.map((p) => [p.label, p]));
+      const byLabel = new Map<string, string>();
+      for (const [id, label] of levelLabelById.current) byLabel.set(label, id);
+      // 1) update or create
+      const keep = new Set<string>();
+      for (const [label, lvl] of want) {
+        const locked = lvl.locked !== false;
+        const existing = byLabel.get(label);
+        if (existing && levelVelaIds.current.includes(existing)) {
+          const all = chart.drawings.all() as any[];
+          const d = all.find((x) => x.id === existing);
+          const cur = d?.anchors?.[0]?.price;
+          if (d && cur !== lvl.price) {
+            chart.drawings.update(existing, { anchors: [{ time: Date.now(), price: lvl.price }] });
+          }
+          keep.add(existing);
+        } else {
+          const d = chart.drawings.add("hline", {
+            anchors: [{ time: Date.now(), price: lvl.price }],
+            style: { lineColor: lvl.color, lineWidth: 1, lineStyle: "dashed" },
+            text: { value: lvl.label, size: "small", hAlign: "right", vAlign: "bottom" },
+          });
+          if (d) {
+            if (locked) chart.drawings.lock(d.id, true);
+            levelVelaIds.current = [...levelVelaIds.current, d.id];
+            managedIds.current.add(d.id);
+            levelLabelById.current.set(d.id, label);
+            keep.add(d.id);
+          }
+        }
+      }
+      // 2) drop labels that vanished
+      for (const id of [...levelVelaIds.current]) {
+        if (keep.has(id)) continue;
+        try { chart.drawings.remove(id); } catch { /* gone */ }
+        levelVelaIds.current = levelVelaIds.current.filter((x) => x !== id);
+        managedIds.current.delete(id);
+        levelLabelById.current.delete(id);
+      }
+      lastMove.current.clear();
+    } finally {
+      syncingLevels.current = false;
     }
-    const ids: string[] = [];
-    for (const lvl of priceLevels) {
-      const d = chart.drawings.add("hline", {
-        anchors: [{ time: Date.now(), price: lvl.price }],
-        style: { lineColor: lvl.color, lineWidth: 1, lineStyle: "dashed" },
-        text: { value: lvl.label, size: "small", hAlign: "right", vAlign: "bottom" },
-      });
-      if (d) { ids.push(d.id); managedIds.current.add(d.id); }
-    }
-    levelVelaIds.current = ids;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelKeys, loading]);
 
