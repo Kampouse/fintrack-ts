@@ -5,7 +5,7 @@ import type { HLUserFill } from "@/api/hyperliquid";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
 import { VelaChart as CandleChart, type PriceLevel } from "./VelaChart";
-import KiyotakaTerminal from "./KiyotakaTerminal";
+import VelaTerminal from "./VelaTerminal";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";
 import { fmtUsd, fmtUsdPrice, fmtPct, fmtQty, fmtDate } from "@/lib/format";
@@ -142,7 +142,7 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
 
   // ─── Terminal mode ───
   if (terminal) {
-    return <KiyotakaTerminal symbol={symbol} entryPrice={hlMeta?.entryPx} onBack={() => onToggleTerminal()} />;
+    return <VelaTerminal symbol={symbol} entryPrice={hlMeta?.entryPx} onBack={() => onToggleTerminal()} />;
   }
 
   // ─── Normal mode (unchanged) ───
