@@ -166,6 +166,7 @@ export function VelaChart({
   // vs user-drawn ones. Vela events only carry {id}, so this set is the filter.
   const managedIds = useRef<Set<string>>(new Set());
   const levelVelaIds = useRef<string[]>([]);
+  const barsRef = useRef<OHLCV[]>([]);
   const tlIdMap = useRef<Map<string, number>>(new Map()); // vela id -> fintrack id
   const tlIdRev = useRef<Map<number, string>>(new Map()); // fintrack id -> vela id
 
@@ -219,6 +220,7 @@ export function VelaChart({
       }
       if (dead || !hostRef.current) return;
       if (!bars.length) { setError(true); return; }
+      barsRef.current = bars;
       setLoading(false);
 
       const chart = new Vela(hostRef.current, {
@@ -353,7 +355,48 @@ export function VelaChart({
       }
     })();
 
+    // ── live refresh: re-fetch bars and swap in-place via setMarket ─────────
+    // (offline data arrays are static; without this the chart never updates
+    //  until a full page reload. setMarket keeps drawings/panes/view intact.)
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let inFlight = false;
+    const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const tick = async () => {
+      const chart = chartRef.current;
+      if (!chart || inFlight) return;
+      if (document.hidden) return; // skip background tabs
+      inFlight = true;
+      try {
+        const { interval } = resolveTf(tf);
+        const hostW = hostRef.current?.clientWidth || 600;
+        const pollCount = Math.max(40, Math.min(500, Math.floor(hostW / 3)));
+        const raw = await fetchBars(symbol, interval, pollCount);
+        if (dead || !chartRef.current) return;
+        const fresh: OHLCV[] = raw.map(b => ({
+          time: barOpen(b.time, resolveTf(tf).ms), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
+        }));
+        if (!fresh.length) return;
+        const prev = barsRef.current;
+        let changed = prev.length !== fresh.length;
+        if (!changed) {
+          for (let i = 1; i <= Math.min(3, prev.length); i++) {
+            const a = prev[prev.length - i], b = fresh[fresh.length - i];
+            if (a.time !== b.time || a.close !== b.close || a.high !== b.high || a.low !== b.low) { changed = true; break; }
+          }
+        }
+        if (!changed) return;
+        chart.setMarket({ data: fresh, timeframe: interval });
+        barsRef.current = fresh;
+      } catch { /* transient poll errors are non-fatal */ }
+      finally { inFlight = false; }
+    };
+    timer = setInterval(tick, 10_000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener("visibilitychange", onVis);
+
     return () => {
+      stopPoll();
+      document.removeEventListener("visibilitychange", onVis);
       dead = true;
       try { chartRef.current?.destroy(); } catch { /* already gone */ }
       chartRef.current = null;
