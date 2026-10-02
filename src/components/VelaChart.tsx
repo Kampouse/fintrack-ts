@@ -159,6 +159,9 @@ export function VelaChart({
   const [error, setError] = useState(false);
   const [localH, setLocalH] = useState(height);
 
+  // parent-driven height wins (drag handle reports up; prop comes back down)
+  useEffect(() => { setLocalH(height); }, [height]);
+
   // vela-id bookkeeping: app-managed drawings (levels + mirrored trendlines)
   // vs user-drawn ones. Vela events only carry {id}, so this set is the filter.
   const managedIds = useRef<Set<string>>(new Set());
@@ -488,8 +491,10 @@ export function VelaChart({
       {resizable && onHeightChange && (
         <div
           onMouseDown={startResize}
-          style={{ position: "absolute", left: 0, right: 0, bottom: -3, height: 6, cursor: "ns-resize", zIndex: 6 }}
-        />
+          style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 12, cursor: "ns-resize", zIndex: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <div style={{ width: 44, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.16)", pointerEvents: "none" }} />
+        </div>
       )}
     </div>
   );

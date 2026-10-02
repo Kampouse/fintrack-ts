@@ -26,6 +26,16 @@ const K = {
 
 const MONO: React.CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, monospace", fontVariantNumeric: "tabular-nums" as const };
 
+// Chart height: user-resized value persists; default ≈55% of viewport
+const CHART_H_KEY = "fintrack_chart_h";
+const defaultChartH = () => Math.min(560, Math.max(320, Math.round(window.innerHeight * 0.55)));
+const loadChartH = (): number => {
+  try {
+    const v = Number(localStorage.getItem(CHART_H_KEY));
+    return Number.isFinite(v) && v >= 120 ? v : defaultChartH();
+  } catch { return defaultChartH(); }
+};
+
 const TF_OPTIONS = [
   { days: 0, label: "5m" },
   { days: -1, label: "1m" },
@@ -56,8 +66,13 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showLots, setShowLots] = useState(false);
   const [showAvgs, setShowAvgs] = useState(false);
-  const [chartH, setChartH] = useState(286);
+  const [chartH, setChartH] = useState(loadChartH);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const changeChartH = useCallback((h: number) => {
+    setChartH(h);
+    try { localStorage.setItem(CHART_H_KEY, String(Math.round(h))); } catch { /* private mode */ }
+  }, []);
 
   // Chart tick for terminal toolbar sync
   const [chartTick, setChartTick] = useState(0);
@@ -354,7 +369,7 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
 
       {/* Chart — rendered once, persists across view switches */}
       <div style={{ border: "1px solid var(--card-border)", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
-        <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={setChartH} priceLevels={priceLevels} />
+        <CandleChart symbol={symbol} height={chartH} resizable onHeightChange={changeChartH} priceLevels={priceLevels} />
       </div>
 
       {/* HL-specific stats */}
