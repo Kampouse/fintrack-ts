@@ -1,4 +1,4 @@
-import { Wallet, LayoutGrid, TrendingUp } from "lucide-react";
+import { Wallet, Terminal, TrendingUp } from "lucide-react";
 
 type Tab = "portfolio" | "terminal";
 
@@ -63,7 +63,7 @@ export function TabBar({ active, onChange, onWatch }: Props) {
           onClick={() => onChange("terminal")}
           aria-label="Terminal"
         >
-          <LayoutGrid size={22} />
+          <Terminal size={22} />
         </button>
         <button
           className="nav-btn"
