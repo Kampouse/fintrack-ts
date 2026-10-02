@@ -355,9 +355,12 @@ export function VelaChart({
       }
     })();
 
-    // ── live refresh: re-fetch bars and swap in-place via setMarket ─────────
-    // (offline data arrays are static; without this the chart never updates
-    //  until a full page reload. setMarket keeps drawings/panes/view intact.)
+    // ── live data ────────────────────────────────────────────────────────────
+    // Primary: Binance kline WebSocket (BINANCE:* and *-USD symbols) pushes
+    // ticks ~2s; we merge into the bar tail and swap in-place via setMarket
+    // (throttled to one swap per 2s; offline arrays are otherwise static).
+    // Backstop: fetchBars poll — 30s when streaming (repair), 10s when not
+    // (primary for HL:/proxy symbols). setMarket keeps drawings/panes/view.
     let timer: ReturnType<typeof setInterval> | null = null;
     let inFlight = false;
     const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
@@ -390,12 +393,81 @@ export function VelaChart({
       } catch { /* transient poll errors are non-fatal */ }
       finally { inFlight = false; }
     };
-    timer = setInterval(tick, 10_000);
-    const onVis = () => { if (!document.hidden) tick(); };
+
+    // stream state
+    let ws: WebSocket | null = null;
+    let wsDead = false;
+    let lastSwap = 0;
+    let swapTimer: ReturnType<typeof setTimeout> | null = null;
+    let hiddenDirty = false;
+
+    const streamKey = (() => {
+      let s = symbol;
+      if (s.startsWith("BINANCE:")) s = s.slice("BINANCE:".length);
+      else if (!/-USD$/.test(s)) return null; // HL:/proxy symbols: no Binance stream
+      if (/-USD$/.test(s)) s = s.replace(/-USD$/, "USDT");
+      const itv = BINANCE_INTERVAL[resolveTf(tf).interval] ?? "1h";
+      return `${s.toLowerCase()}@kline_${itv}`;
+    })();
+
+    const swapNow = () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      chart.setMarket({ data: barsRef.current, timeframe: resolveTf(tf).interval });
+      lastSwap = Date.now();
+    };
+
+    const applyTick = (t: { t: number; o: string; h: string; l: string; c: string; v: string }) => {
+      const ms = resolveTf(tf).ms;
+      const bar: OHLCV = { time: barOpen(t.t, ms), open: +t.o, high: +t.h, low: +t.l, close: +t.c, volume: +t.v };
+      const prev = barsRef.current;
+      if (!prev.length) return; // initial load not done yet — poll reconciles
+      const last = prev[prev.length - 1];
+      if (bar.time === last.time) {
+        if (bar.close === last.close && bar.high === last.high && bar.low === last.low && bar.volume === last.volume) return;
+        barsRef.current = prev.slice(0, -1).concat(bar);
+      } else if (bar.time > last.time) {
+        barsRef.current = prev.concat(bar); // a new bar just opened
+      } else {
+        return;
+      }
+      if (document.hidden) { hiddenDirty = true; return; }
+      const now = Date.now();
+      if (now - lastSwap >= 2000) swapNow();
+      else if (!swapTimer) swapTimer = setTimeout(() => { swapTimer = null; swapNow(); }, 2000 - (now - lastSwap));
+    };
+
+    if (streamKey) {
+      const connect = () => {
+        if (wsDead) return;
+        try {
+          ws = new WebSocket(`wss://stream.binance.com:9443/ws/${streamKey}`);
+          ws.onmessage = (ev) => {
+            try {
+              const m = JSON.parse(ev.data);
+              if (m?.k) applyTick(m.k);
+            } catch { /* malformed frame */ }
+          };
+          ws.onclose = () => { if (!wsDead) setTimeout(connect, 3000); };
+          ws.onerror = () => { try { ws?.close(); } catch { /* closing */ } };
+        } catch { /* WebSocket unavailable — poll covers us */ }
+      };
+      connect();
+    }
+
+    timer = setInterval(tick, streamKey ? 30_000 : 10_000);
+    const onVis = () => {
+      if (document.hidden) return;
+      if (hiddenDirty) { hiddenDirty = false; swapNow(); }
+      tick();
+    };
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
       stopPoll();
+      wsDead = true;
+      try { ws?.close(); } catch { /* already gone */ }
+      if (swapTimer) clearTimeout(swapTimer);
       document.removeEventListener("visibilitychange", onVis);
       dead = true;
       try { chartRef.current?.destroy(); } catch { /* already gone */ }
