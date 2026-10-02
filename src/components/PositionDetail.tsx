@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { ChevronLeft, Trash2, Pencil, Plus, Minus, LayoutGrid, Monitor, X, PanelRightClose, PanelRightOpen, ExternalLink } from "lucide-react";
+import { ChevronLeft, Trash2, Pencil, Plus, Minus, Terminal, Monitor, X, PanelRightClose, PanelRightOpen, ExternalLink } from "lucide-react";
 import type { Transaction, Quote, Position, HLPositionMeta } from "@/types";
 import type { HLUserFill } from "@/api/hyperliquid";
 import { TokenIcon } from "./TokenIcon";
@@ -320,7 +320,7 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
             }}
             aria-label="Toggle layout"
           >
-            {terminal ? <Monitor size={16} color="var(--lime)" /> : <LayoutGrid size={16} color="var(--text-dim)" />}
+            {terminal ? <Monitor size={16} color="var(--lime)" /> : <Terminal size={16} color="var(--text-dim)" />}
           </button>
         </div>
       </div>
