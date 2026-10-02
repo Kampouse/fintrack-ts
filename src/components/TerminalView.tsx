@@ -678,7 +678,10 @@ function MobilePositionCard({ position, onClick }: {
 
       {/* Mini chart */}
       <div style={{ height: 120, background: "rgba(0,0,0,0.15)" }}>
-        <CandleChart symbol={position.symbol} height={120} priceLevels={(position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []} />
+        <CandleChart symbol={position.symbol} height={120} priceLevels={[
+          ...((position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []),
+          ...(position.hlMeta?.liquidationPx != null ? [{ price: position.hlMeta.liquidationPx, label: "Liq", color: "#ef4444" }] : []),
+        ]} />
       </div>
 
       {/* Footer */}
@@ -787,7 +790,10 @@ function TerminalCard({
         background: "rgba(0,0,0,0.15)", 
         overflow: "hidden",
       }}>
-        <CandleChart symbol={position.symbol} height={panel.height - 70} priceLevels={(position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []} />
+        <CandleChart symbol={position.symbol} height={panel.height - 70} priceLevels={[
+          ...((position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []),
+          ...(position.hlMeta?.liquidationPx != null ? [{ price: position.hlMeta.liquidationPx, label: "Liq", color: "#ef4444" }] : []),
+        ]} />
       </div>
 
       {/* Footer */}

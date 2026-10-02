@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { VelaChart } from "./VelaChart";
+import { VelaChart, type PriceLevel } from "./VelaChart";
 import { labelFromSymbol } from "@/lib/constants";
 
 /**
@@ -15,11 +15,12 @@ const HEADER_H = 48;
 
 interface Props {
   symbol: string;
-  entryPrice?: number;
+  /** horizontal price lines: entry, liquidation, tp/sl, ... */
+  levels?: PriceLevel[];
   onBack: () => void;
 }
 
-export default function VelaTerminal({ symbol, entryPrice, onBack }: Props) {
+export default function VelaTerminal({ symbol, levels = [], onBack }: Props) {
   const [tf, setTf] = useState<string>("1h");
   const wrapRef = useRef<HTMLDivElement>(null);
   const [chartH, setChartH] = useState(() => Math.max(200, window.innerHeight - HEADER_H));
@@ -120,7 +121,7 @@ export default function VelaTerminal({ symbol, entryPrice, onBack }: Props) {
           symbol={symbol}
           tf={tf}
           height={chartH}
-          priceLevels={entryPrice ? [{ price: entryPrice, label: "Entry", color: "#f97316" }] : []}
+          priceLevels={levels}
         />
       </div>
     </div>

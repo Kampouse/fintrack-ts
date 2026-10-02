@@ -142,7 +142,10 @@ export function PositionDetail({ symbol, txs, quote, entryPrice, hlMeta, recentF
 
   // ─── Terminal mode ───
   if (terminal) {
-    return <VelaTerminal symbol={symbol} entryPrice={hlMeta?.entryPx} onBack={() => onToggleTerminal()} />;
+    const levels: PriceLevel[] = [];
+    if (hlMeta?.entryPx) levels.push({ price: hlMeta.entryPx, label: "Entry", color: "#f97316" });
+    if (hlMeta?.liquidationPx != null) levels.push({ price: hlMeta.liquidationPx, label: "Liq", color: "#ef4444" });
+    return <VelaTerminal symbol={symbol} levels={levels} onBack={() => onToggleTerminal()} />;
   }
 
   // ─── Normal mode (unchanged) ───
