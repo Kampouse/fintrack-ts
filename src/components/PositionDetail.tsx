@@ -4,7 +4,7 @@ import type { Transaction, Quote, Position, HLPositionMeta } from "@/types";
 import type { HLUserFill } from "@/api/hyperliquid";
 import { TokenIcon } from "./TokenIcon";
 import { BasisChart } from "./BasisChart";
-import { CandleChart, type PriceLevel } from "./CandleChart";
+import { VelaChart as CandleChart, type PriceLevel } from "./VelaChart";
 import KiyotakaTerminal from "./KiyotakaTerminal";
 import { EditLotSheet } from "./EditLotSheet";
 import { labelFromSymbol } from "@/lib/constants";

@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown, Move, LayoutGrid, BarChart3, SidebarOpen, Sid
 import { SearchModal } from "./SearchModal";
 import { FillsView } from "./FillsView";
 import type { EnrichedPosition } from "@/types";
-import { CandleChart } from "./CandleChart";
+import { VelaChart as CandleChart } from "./VelaChart";
 import { TerminalWidgets } from "./TerminalWidgets";
 import { MarketHeatmap } from "./MarketHeatmap";
 import { ChartModal } from "./ChartModal";
@@ -678,7 +678,7 @@ function MobilePositionCard({ position, onClick }: {
 
       {/* Mini chart */}
       <div style={{ height: 120, background: "rgba(0,0,0,0.15)" }}>
-        <CandleChart symbol={position.symbol} height={120} priceLevels={position.hlMeta?.entryPx ? [{ price: position.hlMeta.entryPx, label: "Entry", color: "#f97316" }] : []} />
+        <CandleChart symbol={position.symbol} height={120} priceLevels={(position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []} />
       </div>
 
       {/* Footer */}
@@ -787,7 +787,7 @@ function TerminalCard({
         background: "rgba(0,0,0,0.15)", 
         overflow: "hidden",
       }}>
-        <CandleChart symbol={position.symbol} height={panel.height - 70} priceLevels={position.hlMeta?.entryPx ? [{ price: position.hlMeta.entryPx, label: "Entry", color: "#f97316" }] : []} />
+        <CandleChart symbol={position.symbol} height={panel.height - 70} priceLevels={(position.hlMeta?.entryPx ?? position.avgCost) ? [{ price: position.hlMeta?.entryPx ?? position.avgCost, label: "Entry", color: "#f97316" }] : []} />
       </div>
 
       {/* Footer */}

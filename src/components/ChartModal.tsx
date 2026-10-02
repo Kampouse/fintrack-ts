@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { CandleChart } from "./CandleChart";
+import { VelaChart as CandleChart } from "./VelaChart";
 import { labelFromSymbol } from "@/lib/constants";
 
 interface Props {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, Suspense } from "react";
 import { X, RefreshCw } from "lucide-react";
 import { getCandles } from "@/api/hyperliquid";
-import { CandleChart } from "./CandleChart";
+import { VelaChart as CandleChart } from "./VelaChart";
 import { labelFromSymbol } from "@/lib/constants";
 
 const TF_KEYS = ["1m", "15m", "1h", "4h", "1d"] as const;
