@@ -356,11 +356,13 @@ export function VelaChart({
     })();
 
     // ── live data ────────────────────────────────────────────────────────────
-    // Primary: Binance kline WebSocket (BINANCE:* and *-USD symbols) pushes
-    // ticks ~2s; we merge into the bar tail and swap in-place via setMarket
-    // (throttled to one swap per 2s; offline arrays are otherwise static).
-    // Backstop: fetchBars poll — 30s when streaming (repair), 10s when not
-    // (primary for HL:/proxy symbols). setMarket keeps drawings/panes/view.
+    // Primary: per-trade streams. Binance symbols subscribe kline + aggTrade
+    // (every trade, ms latency); HL:* symbols subscribe the HL trades WS.
+    // Trades build the forming bar locally; setMarket repaints throttled to
+    // one swap per 300ms (trade-grade). The kline frame still reconciles the
+    // tail bar authoritatively (official OHLCV + volume).
+    // Backstop: fetchBars poll — 30s when streaming, 10s for proxy symbols.
+    // setMarket keeps drawings/panes/view.
     let timer: ReturnType<typeof setInterval> | null = null;
     let inFlight = false;
     const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
@@ -400,15 +402,18 @@ export function VelaChart({
     let lastSwap = 0;
     let swapTimer: ReturnType<typeof setTimeout> | null = null;
     let hiddenDirty = false;
+    const SWAP_MS = 300; // trade-grade repaint cap
 
-    const streamKey = (() => {
+    const binanceStreams = (() => {
       let s = symbol;
       if (s.startsWith("BINANCE:")) s = s.slice("BINANCE:".length);
       else if (!/-USD$/.test(s)) return null; // HL:/proxy symbols: no Binance stream
       if (/-USD$/.test(s)) s = s.replace(/-USD$/, "USDT");
+      const sl = s.toLowerCase();
       const itv = BINANCE_INTERVAL[resolveTf(tf).interval] ?? "1h";
-      return `${s.toLowerCase()}@kline_${itv}`;
+      return `${sl}@kline_${itv}/${sl}@aggTrade`; // combined stream
     })();
+    const hlCoin = symbol.startsWith("HL:") ? symbol.slice(3) : null;
 
     const swapNow = () => {
       const chart = chartRef.current;
@@ -417,37 +422,78 @@ export function VelaChart({
       lastSwap = Date.now();
     };
 
-    const applyTick = (t: { t: number; o: string; h: string; l: string; c: string; v: string }) => {
-      const ms = resolveTf(tf).ms;
-      const bar: OHLCV = { time: barOpen(t.t, ms), open: +t.o, high: +t.h, low: +t.l, close: +t.c, volume: +t.v };
+    const scheduleSwap = () => {
+      if (document.hidden) { hiddenDirty = true; return; }
+      const now = Date.now();
+      if (now - lastSwap >= SWAP_MS) swapNow();
+      else if (!swapTimer) swapTimer = setTimeout(() => { swapTimer = null; swapNow(); }, SWAP_MS - (now - lastSwap));
+    };
+
+    /** merge one final bar into the tail (kline frames and trade-built bars) */
+    const mergeBar = (bar: OHLCV) => {
       const prev = barsRef.current;
-      if (!prev.length) return; // initial load not done yet — poll reconciles
+      if (!prev.length) return;
       const last = prev[prev.length - 1];
       if (bar.time === last.time) {
-        if (bar.close === last.close && bar.high === last.high && bar.low === last.low && bar.volume === last.volume) return;
+        if (bar.open === last.open && bar.close === last.close && bar.high === last.high && bar.low === last.low && bar.volume === last.volume) return;
         barsRef.current = prev.slice(0, -1).concat(bar);
       } else if (bar.time > last.time) {
-        barsRef.current = prev.concat(bar); // a new bar just opened
+        barsRef.current = prev.concat(bar);
       } else {
         return;
       }
-      if (document.hidden) { hiddenDirty = true; return; }
-      const now = Date.now();
-      if (now - lastSwap >= 2000) swapNow();
-      else if (!swapTimer) swapTimer = setTimeout(() => { swapTimer = null; swapNow(); }, 2000 - (now - lastSwap));
+      scheduleSwap();
     };
 
-    if (streamKey) {
+    const applyKline = (t: { t: number; o: string; h: string; l: string; c: string; v: string }) => {
+      const ms = resolveTf(tf).ms;
+      mergeBar({ time: barOpen(t.t, ms), open: +t.o, high: +t.h, low: +t.l, close: +t.c, volume: +t.v });
+    };
+
+    // trades build the forming bar locally between authoritative kline frames
+    const applyTrade = (price: number, qty: number, tms: number) => {
+      const ms = resolveTf(tf).ms;
+      const time = barOpen(tms, ms);
+      const prev = barsRef.current;
+      if (!prev.length) return; // initial load not done yet — poll reconciles
+      const last = prev[prev.length - 1];
+      let next: OHLCV;
+      if (time === last.time) {
+        if (price === last.close && price <= last.high && price >= last.low) return; // no visual change
+        next = { time, open: last.open, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price, volume: (last.volume ?? 0) + qty };
+        barsRef.current = prev.slice(0, -1).concat(next);
+      } else if (time > last.time) {
+        next = { time, open: price, high: price, low: price, close: price, volume: qty }; // new bucket just opened
+        barsRef.current = prev.concat(next);
+      } else {
+        return;
+      }
+      scheduleSwap();
+    };
+
+    const onWsMessage = (raw: string) => {
+      try {
+        const m = JSON.parse(raw);
+        const d = m?.data ?? m;
+        if (d?.k) applyKline(d.k); // official OHLCV — always wins
+        else if (d?.p !== undefined && d?.q !== undefined && d?.T) applyTrade(+d.p, +d.q, d.T); // aggTrade
+        else if (Array.isArray(d) && d.length && d[0]?.px !== undefined) { // HL trades batch
+          for (const t of d) if (t.coin === hlCoin) applyTrade(+t.px, +t.sz, t.time);
+        }
+      } catch { /* malformed frame */ }
+    };
+
+    if (binanceStreams || hlCoin) {
       const connect = () => {
         if (wsDead) return;
         try {
-          ws = new WebSocket(`wss://stream.binance.com:9443/ws/${streamKey}`);
-          ws.onmessage = (ev) => {
-            try {
-              const m = JSON.parse(ev.data);
-              if (m?.k) applyTick(m.k);
-            } catch { /* malformed frame */ }
-          };
+          if (binanceStreams) {
+            ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${binanceStreams}`);
+          } else {
+            ws = new WebSocket("wss://api.hyperliquid.xyz/ws");
+            ws.onopen = () => { ws?.send(JSON.stringify({ method: "subscribe", subscription: { type: "trades", coin: hlCoin } })); };
+          }
+          ws.onmessage = (ev) => onWsMessage(ev.data);
           ws.onclose = () => { if (!wsDead) setTimeout(connect, 3000); };
           ws.onerror = () => { try { ws?.close(); } catch { /* closing */ } };
         } catch { /* WebSocket unavailable — poll covers us */ }
@@ -455,7 +501,7 @@ export function VelaChart({
       connect();
     }
 
-    timer = setInterval(tick, streamKey ? 30_000 : 10_000);
+    timer = setInterval(tick, binanceStreams || hlCoin ? 30_000 : 10_000);
     const onVis = () => {
       if (document.hidden) return;
       if (hiddenDirty) { hiddenDirty = false; swapNow(); }

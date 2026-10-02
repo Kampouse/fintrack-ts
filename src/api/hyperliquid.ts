@@ -139,7 +139,7 @@ export async function getCandles(
   const data = await res.json();
   if (!Array.isArray(data)) return [];
   return data.map((k: any) => ({
-    time: (k.t ?? k.startTime ?? 0) * 1000,
+    time: (k.t ?? k.startTime ?? 0), // HL candleSnapshot t is ALREADY ms — do not multiply
     open: Number(k.o),
     high: Number(k.h),
     low: Number(k.l),
