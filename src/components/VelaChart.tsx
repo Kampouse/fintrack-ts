@@ -66,8 +66,8 @@ const TF_MS: Record<string, number> = {
   "1w": 604_800_000,
 };
 
-const HL_INTERVAL: Record<string, "1m" | "15m" | "1h" | "4h" | "1d" | "1w"> = {
-  "1m": "1m", "5m": "15m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w",
+const HL_INTERVAL: Record<string, "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w"> = {
+  "1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w",
 };
 
 function resolveTf(tf?: string): { interval: string; ms: number } {
@@ -106,8 +106,11 @@ async function fetchBinanceKlines(sym: string, interval: string, barCount: numbe
 
 async function fetchProxyCandles(symbol: string, interval: string, barCount: number): Promise<RawBar[]> {
   // Local dev: vite middleware serves the same core as the prod Pages Function.
-  const sec: Record<string, number> = { "1m": 60, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
-  const resolution = interval === "1m" ? "1" : interval === "15m" ? "5" : interval === "1h" ? "60" : "D";
+  // NOTE: Yahoo resolutions: 1/5/15/30/60/D/W — the bucket size must match
+  // `interval` exactly; barOpen() only re-labels timestamps, it cannot merge
+  // finer bars (a mismatch silently produces wrong OHLCV).
+  const sec: Record<string, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+  const resolution = interval === "1m" ? "1" : interval === "5m" ? "5" : interval === "15m" ? "15" : interval === "1h" ? "60" : "D";
   const nowSec = Math.floor(Date.now() / 1000);
   const from = nowSec - barCount * (sec[interval] ?? 86400);
   const res = await fetch(`/api/candles?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${nowSec}`);
@@ -207,24 +210,35 @@ export function VelaChart({
       const hostW = hostRef.current?.clientWidth || 600;
       const barCount = Math.max(40, Math.min(500, Math.floor(hostW / 3)));
       const start = now - barCount * ms;
+      // --- cache-first paint: paint last session's bars instantly, upgrade in place ---
+      const cacheKey = `fintrack:bars:${symbol}|${interval}`;
+      let cached: OHLCV[] | null = null;
+      try {
+        const rawCache = localStorage.getItem(cacheKey);
+        if (rawCache) {
+          const arr = JSON.parse(rawCache) as OHLCV[];
+          if (Array.isArray(arr) && arr.length >= 30 && arr[arr.length - 1]?.time > Date.now() - 7 * 86_400_000) cached = arr;
+        }
+      } catch { /* corrupt cache — ignore */ }
       let bars: OHLCV[] = [];
+      let fetchOk = false;
       try {
         const raw = await fetchBars(symbol, interval, barCount);
         if (dead) return;
         bars = raw.map(b => ({
           time: barOpen(b.time, ms), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
         }));
-      } catch {
-        if (!dead) setError(true);
-        return;
-      }
+        fetchOk = true;
+      } catch { /* offline — fall back to cached paint below */ }
       if (dead || !hostRef.current) return;
-      if (!bars.length) { setError(true); return; }
-      barsRef.current = bars;
+      if (!bars.length && !cached) { setError(true); return; }
+      try { if (fetchOk && bars.length) localStorage.setItem(cacheKey, JSON.stringify(bars.slice(-500))); } catch { /* quota */ }
+      const paint = bars.length ? bars : (cached as OHLCV[]);
+      barsRef.current = paint;
       setLoading(false);
 
       const chart = new Vela(hostRef.current, {
-        data: bars,
+        data: paint,
         timeframe: interval,
         theme: {
           background: "transparent",
@@ -240,6 +254,10 @@ export function VelaChart({
         animations: { intro: { on: false } },
       } as any);
       chartRef.current = chart;
+      // painted from cache and fresh bars arrived → swap them in without a rebuild flash
+      if (cached && bars.length) {
+        try { void chart.setMarket({ data: bars, timeframe: interval }); } catch { /* keep cached paint */ }
+      }
       (window as any).__velaChart = chart; // debug/testing hook
 
       const addLevels = () => {

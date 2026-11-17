@@ -122,7 +122,7 @@ export interface HLCandle {
 
 export async function getCandles(
   coin: string,
-  interval: "1m" | "15m" | "1h" | "4h" | "1d" | "1w",
+  interval: "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w",
   startTime: number, // ms
   endTime?: number,   // ms
   limit = 500,
